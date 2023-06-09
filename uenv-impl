@@ -1,0 +1,67 @@
+#!/usr/bin/env python3
+
+import argparse
+import os
+import pathlib
+import sys
+
+VERSION="0.1-dev"
+colored_output=True
+
+def set_colored_output(cli_arg):
+    # the cli argument overrides all environment variables
+    global colored_output
+    if cli_arg:
+        colored_output=False
+        return
+    if os.environ.get('NO_COLOR') is not None:
+        color_var = os.environ.get('NO_COLOR')
+        if len(color_var)>0 and color_var != "0":
+            colored_output=False
+
+def make_argparser():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--no-color', action="store_true")
+    subparsers = parser.add_subparsers(dest='command')
+
+    start_parser = subparsers.add_parser('start', help='start a user environment')
+    start_parser.add_argument('image', help='the environment image to start')
+
+    return parser
+
+def colorize(string, color):
+    colors = {
+        "red":     "31",
+        "green":   "32",
+        "yellow":  "33",
+        "blue":    "34",
+        "magenta": "35",
+        "cyan":    "36",
+        "white":   "37",
+    }
+    if colored_output:
+        return f"\033[1;{colors[color]}m{string}\033[0m"
+    else:
+        return string
+
+def print_error(msg):
+    print(f"{colorize('[uenv error]', 'magenta')} {msg}", file=sys.stderr)
+
+cmd_string = ":"
+
+parser = make_argparser()
+args = parser.parse_args()
+
+set_colored_output(args.no_color)
+
+if args.command == 'start':
+    img=args.image
+    img_path = pathlib.Path(img)
+    if not img_path.is_absolute():
+        img_path = pathlib.Path.cwd() / img_path
+    if not img_path.is_file():
+        print_error(f"the user-environment {colorize(img, 'white')} does not exist")
+    else:
+        cmd_string = f"squashfs-mount {args.image} /user-environment zsh"
+
+print(cmd_string)
