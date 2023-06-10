@@ -27,6 +27,8 @@ def make_argparser():
     start_parser = subparsers.add_parser('start', help='start a user environment')
     start_parser.add_argument('image', help='the environment image to start')
 
+    stop_parser = subparsers.add_parser('stop', help='stop a loaded user environment')
+
     return parser
 
 def colorize(string, color):
@@ -44,8 +46,11 @@ def colorize(string, color):
     else:
         return string
 
+def uenv_is_loaded():
+    return False
+
 def print_error(msg):
-    print(f"{colorize('[uenv error]', 'magenta')} {msg}", file=sys.stderr)
+    print(f"{colorize('[uenv error]', 'red')} {msg}", file=sys.stderr)
 
 cmd_string = ":"
 
@@ -62,6 +67,12 @@ if args.command == 'start':
     if not img_path.is_file():
         print_error(f"the user-environment {colorize(img, 'white')} does not exist")
     else:
-        cmd_string = f"squashfs-mount {args.image} /user-environment zsh"
+        cmd_string = f"squashfs-mount {args.image} /user-environment sh"
+
+elif args.command == 'stop':
+    if uenv_is_loaded():
+        cmd_string = f"exit 0"
+    else:
+        print_error(f"there is no environment loaded")
 
 print(cmd_string)

@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+
+# optionally update .bashrc
+function prompt_bash_update {
+    path=$1
+
+    # prompt the user
+    echo
+    read -p "Do you want to update $HOME/.bashrc to load uenv? [y/N] " response
+
+    # default to No if no input
+    response=${response:-N}
+
+    # check the user's response
+    case $response in
+        [yY][eE][sS]|[yY])
+            # if yes, create the directory
+            echo "" >> $HOME/.bashrc
+            echo "# configure the user-environment (uenv) utility" >> $HOME/.bashrc
+            echo "source ${path}/bin/activate-uenv" >> $HOME/.bashrc
+
+            echo
+            echo "$HOME/.bashrc has been updated."
+            ;;
+        *)
+            # if anything other than yes, do nothing
+            echo
+            echo "$HOME/.bashrc is umodified - you can update it yourself:"
+            echo "echo \"source ${path}/bin/activate-uenv\" >> $HOME/.bashrc"
+            ;;
+    esac
+
+}
+
+prefix=""
+
+# check for less than 2 arguments (script name + at least one option)
+if [ $# -lt 2 ]; then
+    echo "Error: Missing --prefix argument"
+    echo "Usage: $0 --prefix PATH"
+    exit 1
+fi
+
+# Check for "--prefix" argument
+if [ "$1" == "--prefix" ]; then
+    shift
+    prefix="$1"
+else
+    echo "Error: Missing --prefix argument"
+    echo "Usage: $0 --prefix PATH"
+    exit 1
+fi
+
+version=0.1-dev
+script_path=$(dirname "$(readlink -f "$BASH_SOURCE")")
+
+echo "installing uenv version $version in $prefix"
+echo
+
+mkdir -p $prefix/bin
+echo "installing $prefix/bin/activate-uenv"
+cp $script_path/activate $prefix/bin/activate-uenv
+sed "s|@@prefix@@|$prefix|g" -i $prefix/bin/activate-uenv
+sed "s|@@version@@|$version|g" -i $prefix/bin/activate-uenv
+
+echo "installing $prefix/bin/uenv-impl"
+cp $script_path/uenv-impl $prefix/bin/uenv-impl
+
+prompt_bash_update "$prefix"
+

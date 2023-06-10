@@ -1,0 +1,21 @@
+export UENV_CMD=@@prefix@@/bin/uenv-impl
+export VERSION=@@version@@
+
+function usage {
+    echo "uenv - for using user environments [version ${VERSION}]"
+    echo ""
+    echo "Usage:   uenv [--version] [--help] <command> [<args>]"
+    echo ""
+    echo "the following commands are available"
+    echo "  start      start a new shell with an environment loaded"
+}
+
+function uenv {
+    if [ "$1" = "--version" ]; then
+        echo "uenv version ${VERSION}";
+    elif [[ $# -eq 0 || "$1" = "--help" ]]; then
+        usage;
+    else
+        eval $($UENV_CMD "$@")
+    fi
+}
