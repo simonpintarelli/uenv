@@ -47,7 +47,7 @@ def colorize(string, color):
         return string
 
 def uenv_is_loaded():
-    return False
+    return ("UENV_MOUNT_FILE" in os.environ) and ("UENV_MOUNT_POINT" in os.environ)
 
 def print_error(msg):
     print(f"{colorize('[uenv error]', 'red')} {msg}", file=sys.stderr)
@@ -67,8 +67,7 @@ if args.command == 'start':
     if not img_path.is_file():
         print_error(f"the user-environment {colorize(img, 'white')} does not exist")
     else:
-        cmd_string = f"squashfs-mount {args.image} /user-environment sh"
-
+        cmd_string = f"squashfs-mount {args.image} /user-environment bash"
 elif args.command == 'stop':
     if uenv_is_loaded():
         cmd_string = f"exit 0"
