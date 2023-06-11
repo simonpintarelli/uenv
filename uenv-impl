@@ -35,6 +35,8 @@ def make_argparser():
 
     stop_parser = subparsers.add_parser('stop', help='stop a running user environment')
 
+    status_parser = subparsers.add_parser('status', help='print information about running environments')
+
     return parser
 
 def colorize(string, color):
@@ -55,6 +57,18 @@ def colorize(string, color):
 def uenv_is_loaded():
     return ("UENV_MOUNT_FILE" in os.environ) and ("UENV_MOUNT_POINT" in os.environ)
 
+# return a list of mounted environments
+def uenv_status():
+    if not uenv_is_loaded():
+        return []
+    status = {
+        "image": os.environ.get('UENV_MOUNT_FILE'),
+        "mount": os.environ.get('UENV_MOUNT_POINT'),
+    }
+
+    return [status]
+
+
 def print_error(msg):
     print(f"{colorize('[uenv error]', 'red')} {msg}", file=sys.stderr)
 
@@ -65,6 +79,12 @@ def generate_command(args):
         return generate_start_command(args)
     elif args.command == 'stop':
         return generate_stop_command(args)
+    elif args.command == 'status':
+        return generate_status_command(args)
+    return " :"
+
+def echo_from_lines(lines):
+    return [("echo '" + line + "'") for line in lines]
 
 def generate_start_command(args):
     img=args.image
@@ -77,6 +97,25 @@ def generate_start_command(args):
         return shell_noop
     else:
         return f"squashfs-mount {args.image} /user-environment bash"
+
+def generate_status_command(args):
+    if not uenv_is_loaded():
+        return "echo 'no running environment'"
+
+    environments = uenv_status()
+    num_env = len(environments)
+
+    lines = []
+    if num_env==1:
+        lines.append(f"There is a user environment running")
+    else:
+        lines.append(f"There are {num_env} user environments running")
+
+    for env in environments:
+        lines.append("")
+        lines.append(f"image {colorize(env['image'],'yellow')} at {colorize(env['mount'], 'cyan')}")
+
+    return echo_from_lines(lines)
 
 def generate_stop_command(args):
     if not uenv_is_loaded():
@@ -94,4 +133,7 @@ if __name__ == "__main__":
 
     cmd = generate_command(args)
 
-    print(cmd)
+    if type(cmd) is str:
+        cmd = [cmd]
+    for c in cmd:
+        print(c)

@@ -9,6 +9,7 @@ function usage {
     echo "the following commands are available"
     echo "  start      start a new shell with an environment loaded"
     echo "  stop       stop a shell with an environment loaded"
+    echo "  status     print information about each running environment"
 }
 
 function uenv {
@@ -17,6 +18,6 @@ function uenv {
     elif [[ $# -eq 0 || "$1" = "--help" ]]; then
         usage;
     else
-        eval $($UENV_CMD "$@")
+        eval "$($UENV_CMD "$@")"
     fi
 }
