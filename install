@@ -1,6 +1,16 @@
 #!/usr/bin/env bash
 
-# optionally update .bashrc
+version=0.1-dev
+script_path=$(dirname "$(readlink -f "$BASH_SOURCE")")
+
+function usage {
+    echo "uenv installer"
+    echo "Usage: install [--prefix=] [--help]"
+    echo ""
+    echo "--prefix  : the installation path (default \$HOME/.local)"
+    echo "--help    : print this message"
+}
+
 function prompt_bash_update {
     path=$1
 
@@ -29,30 +39,36 @@ function prompt_bash_update {
             echo "echo \"source ${path}/bin/activate-uenv\" >> $HOME/.bashrc"
             ;;
     esac
-
 }
 
-prefix=""
+# set the default installation location
+prefix="$HOME/.local"
 
-# check for less than 2 arguments (script name + at least one option)
-if [ $# -lt 2 ]; then
-    echo "Error: Missing --prefix argument"
-    echo "Usage: $0 --prefix PATH"
-    exit 1
-fi
+# get number of arguments
+arg_count=$#
 
-# Check for "--prefix" argument
-if [ "$1" == "--prefix" ]; then
-    shift
-    prefix="$1"
-else
-    echo "Error: Missing --prefix argument"
-    echo "Usage: $0 --prefix PATH"
-    exit 1
-fi
-
-version=0.1-dev
-script_path=$(dirname "$(readlink -f "$BASH_SOURCE")")
+# loop over all arguments
+for (( i=1; i<=$arg_count; i++ ))
+do
+    arg=${!i}
+    case $arg in
+        --prefix=*)
+        echo "HELLO --prefix="
+        prefix="${arg#*=}"
+        shift # remove the --prefix argument
+        ;;
+        --help)
+        usage
+        exit 0
+        ;;
+        *)
+        echo "Error: unknown argument $arg"
+        echo
+        usage
+        exit 1
+        ;;
+    esac
+done
 
 echo "installing uenv version $version in $prefix"
 echo
@@ -63,8 +79,8 @@ cp $script_path/activate $prefix/bin/activate-uenv
 sed "s|@@prefix@@|$prefix|g" -i $prefix/bin/activate-uenv
 sed "s|@@version@@|$version|g" -i $prefix/bin/activate-uenv
 
+mkdir -p $prefix/libexec
 echo "installing $prefix/bin/uenv-impl"
-cp $script_path/uenv-impl $prefix/bin/uenv-impl
+cp $script_path/uenv-impl $prefix/libexec/uenv-impl
 
 prompt_bash_update "$prefix"
-

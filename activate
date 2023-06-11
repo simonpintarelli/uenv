@@ -1,4 +1,4 @@
-export UENV_CMD=@@prefix@@/bin/uenv-impl
+export UENV_CMD=@@prefix@@/libexec/uenv-impl
 export VERSION=@@version@@
 
 function usage {
