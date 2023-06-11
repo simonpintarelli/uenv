@@ -8,6 +8,7 @@ function usage {
     echo ""
     echo "the following commands are available"
     echo "  start      start a new shell with an environment loaded"
+    echo "  stop       stop a shell with an environment loaded"
 }
 
 function uenv {

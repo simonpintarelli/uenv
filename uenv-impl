@@ -6,18 +6,24 @@ import pathlib
 import sys
 
 VERSION="0.1-dev"
-colored_output=True
+shell_noop=" :"
 
-def set_colored_output(cli_arg):
-    # the cli argument overrides all environment variables
-    global colored_output
+# Choose whether to use colored output.
+# - by default colored output is ON
+# - if the flag --no-color is passed it is OFF
+# - if the environment variable NO_COLOR is set it is OFF
+def use_colored_output(cli_arg):
+    # The --no-color argument overrides all environment variables if passed.
     if cli_arg:
-        colored_output=False
-        return
+        return False
+
+    # Check the env. var NO_COLOR and disable color if set.
     if os.environ.get('NO_COLOR') is not None:
         color_var = os.environ.get('NO_COLOR')
         if len(color_var)>0 and color_var != "0":
-            colored_output=False
+            return False
+
+    return True
 
 def make_argparser():
     parser = argparse.ArgumentParser()
@@ -27,7 +33,7 @@ def make_argparser():
     start_parser = subparsers.add_parser('start', help='start a user environment')
     start_parser.add_argument('image', help='the environment image to start')
 
-    stop_parser = subparsers.add_parser('stop', help='stop a loaded user environment')
+    stop_parser = subparsers.add_parser('stop', help='stop a running user environment')
 
     return parser
 
@@ -52,26 +58,40 @@ def uenv_is_loaded():
 def print_error(msg):
     print(f"{colorize('[uenv error]', 'red')} {msg}", file=sys.stderr)
 
-cmd_string = ":"
+# Generate the command that is passed back to the calling shell based on the
+# command line arguments.
+def generate_command(args):
+    if args.command == 'start':
+        return generate_start_command(args)
+    elif args.command == 'stop':
+        return generate_stop_command(args)
 
-parser = make_argparser()
-args = parser.parse_args()
-
-set_colored_output(args.no_color)
-
-if args.command == 'start':
+def generate_start_command(args):
     img=args.image
     img_path = pathlib.Path(img)
     if not img_path.is_absolute():
         img_path = pathlib.Path.cwd() / img_path
+
     if not img_path.is_file():
         print_error(f"the user-environment {colorize(img, 'white')} does not exist")
+        return shell_noop
     else:
-        cmd_string = f"squashfs-mount {args.image} /user-environment bash"
-elif args.command == 'stop':
-    if uenv_is_loaded():
-        cmd_string = f"exit 0"
-    else:
-        print_error(f"there is no environment loaded")
+        return f"squashfs-mount {args.image} /user-environment bash"
 
-print(cmd_string)
+def generate_stop_command(args):
+    if not uenv_is_loaded():
+        print_error(f"there is no running environment to stop")
+        return shell_noop
+
+    return "exit 0"
+
+if __name__ == "__main__":
+    parser = make_argparser()
+    args = parser.parse_args()
+
+    global colored_output
+    colored_output = use_colored_output(args.no_color)
+
+    cmd = generate_command(args)
+
+    print(cmd)
