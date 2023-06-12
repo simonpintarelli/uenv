@@ -15,6 +15,35 @@ The installation script will prompt you whether it should add the line, and prov
     When environments are loaded with, e.g. with `uenv start`, a new shell is started with the environment mounted at `/user-environment`.
     In order for the `uenv` commands to be available in the new shell, the activation script must be sourced when the shell starts -- which will be performed automatically if added to your `.bashrc` file.
 
-!!! note
+!!! warning
     Only bash has been tested so far, though zsh should also work.
     Create a GitHub issue if there is a shell that you need to support.
+
+## Using uenv
+
+### Loading an environment
+
+```bash
+uenv start $SCRATCH/images/gromacs.sqfs
+```
+
+Will start a new shell with the environment `gromacs.sqfs` mounted at `/user-environment`.
+
+### Stopping an environment
+
+To stop an environment, you can type `exit` or hit `ctrl-d` in your terminal, or issuing the following command:
+
+```bash
+uenv stop
+```
+
+!!! info
+    The history of commands that were typed in the shell will be lost to the calling shell.
+
+### Status
+
+To get the status of all loaded environments:
+
+```bash
+uenv status
+```
