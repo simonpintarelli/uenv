@@ -47,7 +47,7 @@ class uenv:
 
         view = None
         if os.environ.get('UENV_VIEW') is not None:
-            modules = os.environ.get('UENV_VIEW')
+            view = os.environ.get('UENV_VIEW')
 
         return {"modules": modules, "view": view}
 
@@ -57,11 +57,9 @@ class uenv:
         return self._status["modules"] is not None
 
     @property
-    def loaded_views(self):
-        """a list of the loaded views"""
-        if self._status["view"] is None:
-            return []
-        return [self._status["view"]]
+    def loaded_view(self):
+        """the loaded view, if any"""
+        return self._status["view"]
 
     @property
     def mount(self):
@@ -243,8 +241,12 @@ def generate_view_command(args):
     environments = uenv_images()
     uenv = None if len(environments)==0 else environments[0]
     if uenv is None:
-        print_error(f'there is no environment loaded')
+        print_error(f'there is no uenv loaded')
     else:
+        if uenv.loaded_view is not None:
+            print_error(f'a view is already loaded: {uenv.loaded_view}')
+            return shell_noop
+
         name = args.view_name
         available_views = [v["name"] for v in uenv.views]
         if name in available_views:
@@ -289,15 +291,19 @@ def generate_status_command(args):
             else:
                 lines.append(f"  modules: no modules provided")
 
-            loaded_views = env.loaded_views
+            loaded_view = env.loaded_view
             views = env.views
             lines.append("  views:")
             for v in views:
                 name = v["name"]
-                description = v["description"]
-                if name in loaded_views:
+                if name == loaded_view:
                     name += f" {colorize('(loaded)', 'yellow')}"
-                lines.append(f"    {name}: {description}")
+
+                description = v["description"]
+                if description != "":
+                    description = ": " + description
+
+                lines.append(f"    {name}{description}")
 
     return echo_from_lines(lines)
 
