@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-
 version=0.1-dev
 script_path=$(dirname "$(readlink -f "$BASH_SOURCE")")
 
@@ -80,7 +79,7 @@ sed "s|@@prefix@@|$prefix|g" -i $prefix/bin/activate-uenv
 sed "s|@@version@@|$version|g" -i $prefix/bin/activate-uenv
 
 mkdir -p $prefix/libexec
-echo "installing $prefix/bin/uenv-impl"
+echo "installing $prefix/libexec/uenv-impl"
 cp $script_path/uenv-impl $prefix/libexec/uenv-impl
 
 prompt_bash_update "$prefix"

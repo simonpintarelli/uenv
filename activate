@@ -7,9 +7,11 @@ function usage {
     echo "Usage:   uenv [--version] [--help] <command> [<args>]"
     echo ""
     echo "the following commands are available"
-    echo "  start      start a new shell with an environment loaded"
-    echo "  stop       stop a shell with an environment loaded"
-    echo "  status     print information about each running environment"
+    echo "  start           start a new shell with an environment loaded"
+    echo "  stop            stop a shell with an environment loaded"
+    echo "  status          print information about each running environment"
+    echo "  use-modules     make any modules visible"
+    echo "  load-view       load a view"
 }
 
 function uenv {

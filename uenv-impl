@@ -4,9 +4,115 @@ import argparse
 import os
 import pathlib
 import sys
+import yaml
 
 VERSION="0.1-dev"
 shell_noop=" :"
+
+class uenv:
+    """
+    Represents the state of a loaded environment.
+
+    Initialised with the path where the environment is mounted.
+    """
+
+    def __init__(self, path):
+        self._image =  self.load_image(path)
+        self._status = self.load_status()
+
+    def load_image(self, path):
+        empty_image = {"mount": path, "uenv": None}
+
+        """return information (if any) about the image mounted at path"""
+        if not path.is_dir():
+            return empty_image
+
+        meta_path = path / "meta"
+        env_file = meta_path / "env.json"
+
+        if env_file.is_file():
+            with env_file.open('r') as fid:
+                try:
+                    env = yaml.safe_load(fid)
+                    return {"mount": path, "uenv": env}
+                except:
+                    return empty_image
+
+        return empty_image
+
+    def load_status(self):
+        modules = None
+        if os.environ.get('UENV_MODULE_PATH') is not None:
+            modules = os.environ.get('UENV_MODULE_PATH')
+
+        view = None
+        if os.environ.get('UENV_VIEW') is not None:
+            modules = os.environ.get('UENV_VIEW')
+
+        return {"modules": modules, "view": view}
+
+    @property
+    def modules_loaded(self):
+        """true if the modules have been activated"""
+        return self._status["modules"] is not None
+
+    @property
+    def loaded_views(self):
+        """a list of the loaded views"""
+        if self._status["view"] is None:
+            return []
+        return [self._status["view"]]
+
+    @property
+    def mount(self):
+        """the mount point of the image"""
+        return self._image["mount"]
+
+    @property
+    def is_uenv(self):
+        """true if the mounted image provided meta data that describes a uenv"""
+        return self._image["uenv"] is not None
+
+    @property
+    def modules(self):
+        """the module path if modules are provided by the uenv"""
+        if not self.is_uenv:
+            return None
+        m = self._image["uenv"].get("modules", None)
+        if m is None:
+            return None
+        return m.get("root", None)
+
+    @property
+    def description(self):
+        """description of the uenv"""
+        if not self.is_uenv:
+            return ""
+        return self._image["uenv"].get("description", "")
+
+    @property
+    def name(self):
+        """name of the uenv"""
+        if not self.is_uenv:
+            return "anonymous"
+        return self._image["uenv"].get("name", "unamed")
+
+    @property
+    def views(self):
+        """a list of views provided by the uenv"""
+        if not self.is_uenv:
+            return []
+
+        vlist = self._image["uenv"].get("views", None)
+
+        if vlist is None:
+            return []
+
+        views = []
+        for name, info in vlist.items():
+            views.append({"name": name, "path": info["activate"], "description": info["description"]})
+
+        return views
 
 # Choose whether to use colored output.
 # - by default colored output is ON
@@ -37,6 +143,8 @@ def make_argparser():
 
     status_parser = subparsers.add_parser('status', help='print information about running environments')
 
+    status_parser = subparsers.add_parser('use-modules', help='use modules if they are available')
+
     return parser
 
 def colorize(string, color):
@@ -54,20 +162,26 @@ def colorize(string, color):
     else:
         return string
 
+def uenv_images():
+    """test which images are loaded.
+
+    Returns a list of mount points for all loaded images (empty list if no images are loaded)
+    """
+
+    # test for the original mount method
+    if ("UENV_MOUNT_FILE" in os.environ) and ("UENV_MOUNT_POINT" in os.environ):
+        mnt = os.environ.get("UENV_MOUNT_POINT")
+
+        # todo: check whether an image has been mounted at UENV_MOUNT_POINT?
+        #   findmnt -n --mountpoint /user-environment
+        # should return something like:
+        #   /user-environment /dev/loop12 squashfs ro,nosuid,nodev,relatime
+        return [uenv(pathlib.Path(mnt))]
+
+    return []
+
 def uenv_is_loaded():
-    return ("UENV_MOUNT_FILE" in os.environ) and ("UENV_MOUNT_POINT" in os.environ)
-
-# return a list of mounted environments
-def uenv_status():
-    if not uenv_is_loaded():
-        return []
-    status = {
-        "image": os.environ.get('UENV_MOUNT_FILE'),
-        "mount": os.environ.get('UENV_MOUNT_POINT'),
-    }
-
-    return [status]
-
+    return len(uenv_images()) > 0
 
 def print_error(msg):
     print(f"{colorize('[uenv error]', 'red')} {msg}", file=sys.stderr)
@@ -81,6 +195,10 @@ def generate_command(args):
         return generate_stop_command(args)
     elif args.command == 'status':
         return generate_status_command(args)
+   #elif args.command == 'view':
+   #    return generate_view_command(args)
+    elif args.command == 'modules':
+        return generate_view_command(args)
     return " :"
 
 def echo_from_lines(lines):
@@ -99,21 +217,45 @@ def generate_start_command(args):
         return f"squashfs-mount {args.image} /user-environment bash"
 
 def generate_status_command(args):
-    if not uenv_is_loaded():
-        return "echo 'no running environment'"
-
-    environments = uenv_status()
+    environments = uenv_images()
     num_env = len(environments)
+    if num_env == 0:
+        return echo_from_lines(["no user environment"])
 
     lines = []
-    if num_env==1:
-        lines.append(f"There is a user environment running")
-    else:
-        lines.append(f"There are {num_env} user environments running")
+    first = True
 
     for env in environments:
-        lines.append("")
-        lines.append(f"image {colorize(env['image'],'yellow')} at {colorize(env['mount'], 'cyan')}")
+        if not first:
+            lines.append("")
+            first = False
+
+        if not env.is_uenv:
+            lines.append(f"{colorize(env['mount'], 'cyan')}")
+            lines.append(f"  anonymous environment with no meta data")
+        else:
+            name = env.name
+            description = env.description
+            lines.append(f"{colorize(env.mount, 'cyan')}:{colorize(env.name, 'yellow')}")
+            lines.append(f"  {description}")
+            lines.append(f"")
+            modules_avail = env.modules is not None
+            if env.modules_loaded:
+                lines.append(f"  modules: {colorize('loaded', 'yellow')}")
+            elif modules_avail:
+                lines.append(f"  modules: available")
+            else:
+                lines.append(f"  modules: no modules provided")
+
+            loaded_views = env.loaded_views
+            views = env.views
+            lines.append("  views:")
+            for v in views:
+                name = v["name"]
+                description = v["description"]
+                if name in loaded_views:
+                    name += f" {colorize('(loaded)', 'yellow')}"
+                lines.append(f"    {name}: {description}")
 
     return echo_from_lines(lines)
 
