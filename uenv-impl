@@ -133,17 +133,18 @@ def use_colored_output(cli_arg):
 
 def make_argparser():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--no-color', action="store_true")
-    subparsers = parser.add_subparsers(dest='command')
+    parser.add_argument("--no-color", action="store_true")
+    subparsers = parser.add_subparsers(dest="command")
 
-    start_parser = subparsers.add_parser('start', help='start a user environment')
-    start_parser.add_argument('image', help='the environment image to start')
+    start_parser = subparsers.add_parser("start", help="start a user environment")
+    start_parser.add_argument("image", help="the environment image to start")
 
-    stop_parser = subparsers.add_parser('stop', help='stop a running user environment')
+    stop_parser = subparsers.add_parser("stop", help="stop a running user environment")
 
-    status_parser = subparsers.add_parser('status', help='print information about running environments')
+    status_parser = subparsers.add_parser("status", help="print information about running environments")
 
-    status_parser = subparsers.add_parser('use-modules', help='use modules if they are available')
+    modules_parser = subparsers.add_parser("modules", help="use modules if they are available")
+    modules_parser.add_argument("--use", action="store_true", help="use modules if available")
 
     return parser
 
@@ -189,16 +190,17 @@ def print_error(msg):
 # Generate the command that is passed back to the calling shell based on the
 # command line arguments.
 def generate_command(args):
-    if args.command == 'start':
+    if args.command == "start":
         return generate_start_command(args)
-    elif args.command == 'stop':
+    elif args.command == "stop":
         return generate_stop_command(args)
-    elif args.command == 'status':
+    elif args.command == "status":
         return generate_status_command(args)
-   #elif args.command == 'view':
+   #elif args.command == "view":
    #    return generate_view_command(args)
-    elif args.command == 'modules':
-        return generate_view_command(args)
+    elif args.command == "modules":
+        return generate_modules_command(args)
+    print_error(f"unknown command '{args.command}'")
     return " :"
 
 def echo_from_lines(lines):
@@ -215,6 +217,22 @@ def generate_start_command(args):
         return shell_noop
     else:
         return f"squashfs-mount {args.image} /user-environment bash"
+
+def generate_modules_command(args):
+    environments = uenv_images()
+    uenv = None if len(environments)==0 else environments[0]
+    if not args.use:
+        if uenv.modules_loaded:
+            return "echo 'modules are activated: use \"module avail\" to view available modules'"
+        elif uenv.modules is not None:
+            return "echo 'modules are not activated: activate with \"uenv modules --use\"'"
+        else:
+            return "echo 'this uenv does not provide modules'"
+    else:
+        return ["module use /user-environment/modules",
+                f"export UENV_MODULE_PATH={uenv.modules}",]
+
+    return shell_noop
 
 def generate_status_command(args):
     environments = uenv_images()

@@ -10,7 +10,7 @@ function usage {
     echo "  start           start a new shell with an environment loaded"
     echo "  stop            stop a shell with an environment loaded"
     echo "  status          print information about each running environment"
-    echo "  use-modules     make any modules visible"
+    echo "  modules         view module status and activate with --use"
     echo "  load-view       load a view"
 }
 
