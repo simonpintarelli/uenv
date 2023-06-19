@@ -110,7 +110,7 @@ class uenv:
 
         views = []
         for name, info in vlist.items():
-            views.append({"name": name, "path": info["activate"], "description": info["description"]})
+            views.append({"name": name, "activate": info["activate"], "description": info["description"]})
 
         return views
 
@@ -145,6 +145,9 @@ def make_argparser():
 
     modules_parser = subparsers.add_parser("modules", help="use modules if they are available")
     modules_parser.add_argument("--use", action="store_true", help="use modules if available")
+
+    views_parser = subparsers.add_parser("view", help="activate a view")
+    views_parser.add_argument("view_name", help="the name of the view to load")
 
     return parser
 
@@ -196,8 +199,8 @@ def generate_command(args):
         return generate_stop_command(args)
     elif args.command == "status":
         return generate_status_command(args)
-   #elif args.command == "view":
-   #    return generate_view_command(args)
+    elif args.command == "view":
+        return generate_view_command(args)
     elif args.command == "modules":
         return generate_modules_command(args)
     print_error(f"unknown command '{args.command}'")
@@ -221,7 +224,9 @@ def generate_start_command(args):
 def generate_modules_command(args):
     environments = uenv_images()
     uenv = None if len(environments)==0 else environments[0]
-    if not args.use:
+    if uenv is None:
+        print_error(f'there is no environment loaded')
+    elif not args.use:
         if uenv.modules_loaded:
             return "echo 'modules are activated: use \"module avail\" to view available modules'"
         elif uenv.modules is not None:
@@ -231,6 +236,25 @@ def generate_modules_command(args):
     else:
         return ["module use /user-environment/modules",
                 f"export UENV_MODULE_PATH={uenv.modules}",]
+
+    return shell_noop
+
+def generate_view_command(args):
+    environments = uenv_images()
+    uenv = None if len(environments)==0 else environments[0]
+    if uenv is None:
+        print_error(f'there is no environment loaded')
+    else:
+        name = args.view_name
+        available_views = [v["name"] for v in uenv.views]
+        if name in available_views:
+            #path = uenv.views[name]['activate']
+            i = available_views.index(name)
+            path = uenv.views[i]['activate']
+            return [f"source '{path}'",
+                    f"export UENV_VIEW={name}",]
+        else:
+            print_error(f'the view "{name}" is not one of the available views: {available_views}')
 
     return shell_noop
 
