@@ -1,10 +1,15 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3
+
+# --- A note about the shebang ---
+# It is hard-coded to /usr/bin/python3 instead of "/usr/bin/env python3" so that the
+# same python3 is always used, instead of using a version of python3 that might be
+# loaded into the environment.
 
 import argparse
+import json
 import os
 import pathlib
 import sys
-import yaml
 
 VERSION="0.1-dev"
 shell_noop=" :"
@@ -33,7 +38,7 @@ class uenv:
         if env_file.is_file():
             with env_file.open('r') as fid:
                 try:
-                    env = yaml.safe_load(fid)
+                    env = json.load(fid)
                     return {"mount": path, "uenv": env}
                 except:
                     return empty_image
