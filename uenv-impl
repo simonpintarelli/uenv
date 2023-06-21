@@ -14,6 +14,139 @@ import sys
 VERSION="0.1-dev"
 shell_noop=" :"
 
+def make_argparser():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--no-color", action="store_true")
+    subparsers = parser.add_subparsers(dest="command")
+
+    start_parser = subparsers.add_parser("start",
+            help="start a user environment")
+    start_parser.add_argument("image",
+            help="the environment image to start")
+
+    stop_parser = subparsers.add_parser("stop",
+            help="stop a running user environment")
+
+    status_parser = subparsers.add_parser("status",
+            help="print information about running environments")
+
+    modules_parser = subparsers.add_parser("modules",
+            help="use modules if they are available")
+    modules_parser.add_argument("--use",
+            action="store_true", help="use modules if available")
+
+    views_parser = subparsers.add_parser("view",
+            help="activate a view")
+    views_parser.add_argument("view_name",
+            help="the name of the view to load")
+
+    return parser
+
+###############################################################################
+# Utility functions for string handling, printing, etc.
+###############################################################################
+
+# Choose whether to use colored output.
+# - by default colored output is ON
+# - if the flag --no-color is passed it is OFF
+# - if the environment variable NO_COLOR is set it is OFF
+def use_colored_output(cli_arg):
+    # The --no-color argument overrides all environment variables if passed.
+    if cli_arg:
+        return False
+
+    # Check the env. var NO_COLOR and disable color if set.
+    if os.environ.get('NO_COLOR') is not None:
+        color_var = os.environ.get('NO_COLOR')
+        if len(color_var)>0 and color_var != "0":
+            return False
+
+    return True
+
+def colorize(string, color):
+    colors = {
+        "red":     "31",
+        "green":   "32",
+        "yellow":  "33",
+        "blue":    "34",
+        "magenta": "35",
+        "cyan":    "36",
+        "white":   "37",
+    }
+    if colored_output:
+        return f"\033[1;{colors[color]}m{string}\033[0m"
+    else:
+        return string
+
+def print_error(msg):
+    print(f"{colorize('[uenv error]', 'red')} {msg}", file=sys.stderr)
+
+def echo_from_lines(lines):
+    return [("echo '" + line + "'") for line in lines]
+
+###############################################################################
+# Types that read and represent uenv status
+###############################################################################
+
+class environment:
+    """
+    Represents the state the global uenv environment.
+    """
+    def __init__(self):
+        self._status = self.load_status()
+
+        self._uenvs = []
+
+        # test for the original mount method
+        if ("UENV_MOUNT_FILE" in os.environ) and ("UENV_MOUNT_POINT" in os.environ):
+            mnt = os.environ.get("UENV_MOUNT_POINT")
+
+            # todo: check whether an image has been mounted at UENV_MOUNT_POINT?
+            #   findmnt -n --mountpoint /user-environment
+            # should return something like:
+            #   /user-environment /dev/loop12 squashfs ro,nosuid,nodev,relatime
+            self._uenvs = [uenv(pathlib.Path(mnt))]
+
+
+    def load_status(self):
+        modules = None
+        if os.environ.get('UENV_MODULE_PATH') is not None:
+            modules = os.environ.get('UENV_MODULE_PATH')
+
+        view = None
+        if os.environ.get('UENV_VIEW') is not None:
+            view = os.environ.get('UENV_VIEW')
+
+        vcluster = None
+        if os.environ.get('CLUSTER_NAME') is not None:
+            system = os.environ.get('CLUSTER_NAME')
+
+        return {"modules": modules, "view": view, "vcluster": vcluster}
+
+    @property
+    def uenvs(self):
+        return self._uenvs
+
+    @property
+    def active(self):
+        """true if one or more uenv has been mounted"""
+        return len(self._uenvs)>0
+
+    @property
+    def modules_loaded(self):
+        """true if the modules have been activated"""
+        return self._status["modules"] is not None
+
+    @property
+    def loaded_view(self):
+        """the loaded view, if any"""
+        return self._status["view"]
+
+    @property
+    def vcluster(self):
+        """the loaded view, if any"""
+        return self._status["vcluster"]
+
 class uenv:
     """
     Represents the state of a loaded environment.
@@ -23,7 +156,6 @@ class uenv:
 
     def __init__(self, path):
         self._image =  self.load_image(path)
-        self._status = self.load_status()
 
     def load_image(self, path):
         empty_image = {"mount": path, "uenv": None}
@@ -44,27 +176,6 @@ class uenv:
                     return empty_image
 
         return empty_image
-
-    def load_status(self):
-        modules = None
-        if os.environ.get('UENV_MODULE_PATH') is not None:
-            modules = os.environ.get('UENV_MODULE_PATH')
-
-        view = None
-        if os.environ.get('UENV_VIEW') is not None:
-            view = os.environ.get('UENV_VIEW')
-
-        return {"modules": modules, "view": view}
-
-    @property
-    def modules_loaded(self):
-        """true if the modules have been activated"""
-        return self._status["modules"] is not None
-
-    @property
-    def loaded_view(self):
-        """the loaded view, if any"""
-        return self._status["view"]
 
     @property
     def mount(self):
@@ -117,81 +228,9 @@ class uenv:
 
         return views
 
-# Choose whether to use colored output.
-# - by default colored output is ON
-# - if the flag --no-color is passed it is OFF
-# - if the environment variable NO_COLOR is set it is OFF
-def use_colored_output(cli_arg):
-    # The --no-color argument overrides all environment variables if passed.
-    if cli_arg:
-        return False
-
-    # Check the env. var NO_COLOR and disable color if set.
-    if os.environ.get('NO_COLOR') is not None:
-        color_var = os.environ.get('NO_COLOR')
-        if len(color_var)>0 and color_var != "0":
-            return False
-
-    return True
-
-def make_argparser():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--no-color", action="store_true")
-    subparsers = parser.add_subparsers(dest="command")
-
-    start_parser = subparsers.add_parser("start", help="start a user environment")
-    start_parser.add_argument("image", help="the environment image to start")
-
-    stop_parser = subparsers.add_parser("stop", help="stop a running user environment")
-
-    status_parser = subparsers.add_parser("status", help="print information about running environments")
-
-    modules_parser = subparsers.add_parser("modules", help="use modules if they are available")
-    modules_parser.add_argument("--use", action="store_true", help="use modules if available")
-
-    views_parser = subparsers.add_parser("view", help="activate a view")
-    views_parser.add_argument("view_name", help="the name of the view to load")
-
-    return parser
-
-def colorize(string, color):
-    colors = {
-        "red":     "31",
-        "green":   "32",
-        "yellow":  "33",
-        "blue":    "34",
-        "magenta": "35",
-        "cyan":    "36",
-        "white":   "37",
-    }
-    if colored_output:
-        return f"\033[1;{colors[color]}m{string}\033[0m"
-    else:
-        return string
-
-def uenv_images():
-    """test which images are loaded.
-
-    Returns a list of mount points for all loaded images (empty list if no images are loaded)
-    """
-
-    # test for the original mount method
-    if ("UENV_MOUNT_FILE" in os.environ) and ("UENV_MOUNT_POINT" in os.environ):
-        mnt = os.environ.get("UENV_MOUNT_POINT")
-
-        # todo: check whether an image has been mounted at UENV_MOUNT_POINT?
-        #   findmnt -n --mountpoint /user-environment
-        # should return something like:
-        #   /user-environment /dev/loop12 squashfs ro,nosuid,nodev,relatime
-        return [uenv(pathlib.Path(mnt))]
-
-    return []
-
-def uenv_is_loaded():
-    return len(uenv_images()) > 0
-
-def print_error(msg):
-    print(f"{colorize('[uenv error]', 'red')} {msg}", file=sys.stderr)
+###############################################################################
+# Functions that generate the string(s) that are eval'ed in the calling shell.
+###############################################################################
 
 # Generate the command that is passed back to the calling shell based on the
 # command line arguments.
@@ -209,10 +248,12 @@ def generate_command(args):
     print_error(f"unknown command '{args.command}'")
     return " :"
 
-def echo_from_lines(lines):
-    return [("echo '" + line + "'") for line in lines]
-
 def generate_start_command(args):
+    env = environment()
+    if env.active:
+        print_error(f'a uenv is already running')
+        return shell_noop
+
     img=args.image
     img_path = pathlib.Path(img)
     if not img_path.is_absolute():
@@ -225,12 +266,15 @@ def generate_start_command(args):
         return f"squashfs-mount {args.image} /user-environment bash"
 
 def generate_modules_command(args):
-    environments = uenv_images()
-    uenv = None if len(environments)==0 else environments[0]
-    if uenv is None:
+    env = environment()
+
+    if not env.active:
         print_error(f'there is no environment loaded')
-    elif not args.use:
-        if uenv.modules_loaded:
+
+    uenv = env.uenvs[0]
+
+    if not args.use:
+        if env.modules_loaded:
             return "echo 'modules are activated: use \"module avail\" to view available modules'"
         elif uenv.modules is not None:
             return "echo 'modules are not activated: activate with \"uenv modules --use\"'"
@@ -243,52 +287,53 @@ def generate_modules_command(args):
     return shell_noop
 
 def generate_view_command(args):
-    environments = uenv_images()
-    uenv = None if len(environments)==0 else environments[0]
-    if uenv is None:
-        print_error(f'there is no uenv loaded')
-    else:
-        if uenv.loaded_view is not None:
-            print_error(f'a view is already loaded: {uenv.loaded_view}')
-            return shell_noop
+    env = environment()
 
-        name = args.view_name
-        available_views = [v["name"] for v in uenv.views]
-        if name in available_views:
-            #path = uenv.views[name]['activate']
-            i = available_views.index(name)
-            path = uenv.views[i]['activate']
-            return [f"source '{path}'",
-                    f"export UENV_VIEW={name}",]
-        else:
-            print_error(f'the view "{name}" is not one of the available views: {available_views}')
+    if not env.active:
+        print_error(f'there is no environment loaded')
+
+    uenv = env.uenvs[0]
+
+    if env.loaded_view is not None:
+        print_error(f'a view is already loaded: {env.loaded_view}')
+        return shell_noop
+
+    name = args.view_name
+    available_views = [v["name"] for v in uenv.views]
+    if name in available_views:
+        i = available_views.index(name)
+        path = uenv.views[i]['activate']
+        return [f"source '{path}'",
+                f"export UENV_VIEW={name}",]
+    else:
+        print_error(f'the view "{name}" is not one of the available views: {available_views}')
 
     return shell_noop
 
 def generate_status_command(args):
-    environments = uenv_images()
-    num_env = len(environments)
-    if num_env == 0:
+    env = environment()
+    num_env = len(env.uenvs)
+    if not env.active:
         return echo_from_lines(["no user environment"])
 
     lines = []
     first = True
 
-    for env in environments:
+    for uenv in env.uenvs:
         if not first:
             lines.append("")
             first = False
 
-        if not env.is_uenv:
-            lines.append(f"{colorize(env['mount'], 'cyan')}")
+        if not uenv.is_uenv:
+            lines.append(f"{colorize(uenv['mount'], 'cyan')}")
             lines.append(f"  anonymous environment with no meta data")
         else:
-            name = env.name
-            description = env.description
-            lines.append(f"{colorize(env.mount, 'cyan')}:{colorize(env.name, 'yellow')}")
+            name = uenv.name
+            description = uenv.description
+            lines.append(f"{colorize(uenv.mount, 'cyan')}:{colorize(uenv.name, 'yellow')}")
             lines.append(f"  {description}")
             lines.append(f"")
-            modules_avail = env.modules is not None
+            modules_avail = uenv.modules is not None
             if env.modules_loaded:
                 lines.append(f"  modules: {colorize('loaded', 'yellow')}")
             elif modules_avail:
@@ -297,7 +342,7 @@ def generate_status_command(args):
                 lines.append(f"  modules: no modules provided")
 
             loaded_view = env.loaded_view
-            views = env.views
+            views = uenv.views
             lines.append("  views:")
             for v in views:
                 name = v["name"]
@@ -313,11 +358,14 @@ def generate_status_command(args):
     return echo_from_lines(lines)
 
 def generate_stop_command(args):
-    if not uenv_is_loaded():
+    env = environment()
+
+    if not env.active:
         print_error(f"there is no running environment to stop")
         return shell_noop
 
     return "exit 0"
+
 
 if __name__ == "__main__":
     parser = make_argparser()
