@@ -1,0 +1,19 @@
+name: builds
+on: [push, pull_request]
+
+jobs:
+  makefile:
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/checkout@v2
+      - name: setup
+        run: |
+          # create the mount points
+          sudo mkdir /user-environment
+          sudo mkdir /user-tools
+          # create the test environment
+          ./test/setup --full
+      - name: test
+        run: |
+          # run the tests
+          ./test/test --verbose
