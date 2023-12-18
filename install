@@ -94,4 +94,14 @@ echo "installing $prefix/libexec/uenv-impl"
 cp $script_path/uenv-impl $prefix/libexec/uenv-impl
 sed "s|@@version@@|$version|g" -i $prefix/libexec/uenv-impl
 
+# download and install oras client
+echo "installing oras client"
+oras_version=1.1.0
+oras_file=oras_${oras_version}_linux_amd64.tar.gz
+oras_url=https://github.com/oras-project/oras/releases/download/v${oras_version}/${oras_file}
+oras_path=`mktemp -d`
+(cd "$oras_path"; wget --quiet "$oras_url"; tar -xzf $oras_file; rm *.tar.gz)
+cp $oras_path/oras $prefix/libexec/uenv-oras
+rm -rf $oras_path
+
 prompt_bash_update "$prefix" "$always_yes"

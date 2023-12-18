@@ -1,5 +1,6 @@
 export UENV_CMD=@@prefix@@/libexec/uenv-impl
 export UENV_VERSION=@@version@@
+export UENV_PREFIX=@@prefix@@
 
 function usage {
     echo "uenv - for using user environments [version @@version@@]"
