@@ -20,6 +20,8 @@ function uenv {
         echo "@@version@@";
     elif [[ $# -eq 0 || "$1" = "--help" || "$1" = "-h" ]]; then
         usage;
+    elif [[ " $* " =~ [[:space:]](-h|--help)[[:space:]] ]]; then
+        echo "$($UENV_CMD "$@")"
     else
         eval "$($UENV_CMD "$@")"
     fi
