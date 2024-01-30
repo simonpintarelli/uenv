@@ -5,6 +5,7 @@ import argparse
 from datetime import datetime, timezone
 import os
 import requests
+import subprocess
 import sys
 
 # Choose whether to use colored output.
@@ -40,7 +41,7 @@ def colorize(string, color):
         return string
 
 def print_error_and_exit(message):
-    print(f"{colorize('error', 'red')}{message}", file=sys.stderr)
+    print(f"{colorize('error', 'red')} {message}", file=sys.stderr)
     exit(1)
 
 def make_argparser():
@@ -95,16 +96,6 @@ def get_filter(args):
     repo = options["repo"]
 
     return repo, img_filter
-
-def print_records(records):
-    if len(records)>0:
-        print(colorize(f"{'uenv/version:tag':40}{'uarch':6}{'date':10}", "yellow"))
-        for r in records:
-            namestr = f"{r.name}/{r.version}"
-            tagstr = f"{r.tag}"
-            label = namestr + ":" + tagstr
-            datestr = r.date.strftime("%Y-%m-%d")
-            print(f"{label:<40}{r.uarch:6}{datestr}")
 
 class Record:
     # build/eiger/zen2/cp2k/2023/1133706947
@@ -172,10 +163,20 @@ class Record:
     def tag(self):
         return self._tag
 
+# pretty print a list of Record
+def print_records(records):
+    if len(records)>0:
+        print(colorize(f"{'uenv/version:tag':40}{'uarch':6}{'date':10}", "yellow"))
+        for r in records:
+            namestr = f"{r.name}/{r.version}"
+            tagstr = f"{r.tag}"
+            label = namestr + ":" + tagstr
+            datestr = r.date.strftime("%Y-%m-%d")
+            print(f"{label:<40}{r.uarch:6}{datestr}")
 
 class DataStore:
     def __init__(self):
-        self.store = {"system": {}, "uarch": {}, "name": {}, "version": {}}
+        self.store = {"system": {}, "uarch": {}, "name": {}, "version": {}, "tag": {}}
 
     def add_record(self, record, date):
         fields = record.split("/")
@@ -185,10 +186,11 @@ class DataStore:
         system, uarch, name, version, tag = fields
         r = Record(system, uarch, name, version, tag, date)
 
-        self.store["system"].setdefault(system, []).append(r)
-        self.store["uarch"].setdefault(uarch, []).append(r)
-        self.store["name"].setdefault(name, []).append(r)
+        self.store["system"] .setdefault(system, []).append(r)
+        self.store["uarch"]  .setdefault(uarch, []).append(r)
+        self.store["name"]   .setdefault(name, []).append(r)
         self.store["version"].setdefault(version, []).append(r)
+        self.store["tag"]    .setdefault(tag, []).append(r)
 
     def get_records(self, **constraints):
         if not constraints:
@@ -196,7 +198,7 @@ class DataStore:
 
         for field in constraints:
             if field not in self.store:
-                raise ValueError(f"Invalid field: {field}. Must be one of 'system', 'uarch', 'name', 'version'")
+                raise ValueError(f"Invalid field: {field}. Must be one of 'system', 'uarch', 'name', 'version', 'tag'")
 
         # Find matching records for each constraint
         matching_records_sets = [
@@ -261,7 +263,7 @@ def to_datetime(string):
     dt_format = '%Y-%m-%dT%H:%M:%S.%fZ'
     return datetime.strptime(string, dt_format).replace(tzinfo=timezone.utc)
 
-# return dictionary (name, version, tag) from a uenv description string
+# return dictionary {"name", "version", "tag"} from a uenv description string
 #       "prgenv_gnu"              -> ("prgenv_gnu", None, None)
 #       "prgenv_gnu/23.11"        -> ("prgenv_gnu", "23.11", None)
 #       "prgenv_gnu/23.11:latest" -> ("prgenv_gnu", "23.11", "latest")
@@ -278,6 +280,24 @@ def parse_uenv_string(desc):
 
     return {"name": name, "version": version, "tag": tag}
 
+def run_oras_command(args):
+    try:
+        command = ['oras'] + args
+        print(f"colorize('running oras', 'yellow'): {' '.join(command)}")
+        result = subprocess.run(
+            command,
+            stdout=subprocess.PIPE,  # Capture standard output
+            stderr=subprocess.PIPE,  # Capture standard error
+            check=True,  # Raise exception if command fails
+            encoding='utf-8'  # Decode output from bytes to string
+        )
+
+        # Print standard output
+        print("Output:\n", result.stdout)
+
+    except subprocess.CalledProcessError as e:
+        # Print error message along with captured standard error
+        print("An error occurred:\n", e.stderr)
 
 if __name__ == "__main__":
     database = {"build": DataStore(), "deploy": DataStore()}
@@ -300,9 +320,9 @@ if __name__ == "__main__":
 
     # hoist option filtering and parsing the databse
     # outside the find and pull commands
+    options = get_options(args)
     repo, img_filter = get_filter(args)
     records = database[repo].get_records(**img_filter)
-
 
     if args.command == "find":
         print_records(records)
@@ -312,24 +332,29 @@ if __name__ == "__main__":
             print("no images match the query")
 
     if args.command == "pull":
-        print_records(records)
-
         # verify that there is at least one image that matches the query
         if len(records)==0:
-            print_error_and_exit("no images match the query")
+            print_error_and_exit(f"no images match the query {args.uenv}")
 
         # check that there is only one uenv name
         if len(set([r.name for r in records]))>1:
-            print_error_and_exit("ambiguous uenv name")
+            print_records(records)
+            print()
+            print_error_and_exit(f"ambiguous uenv {args.uenv}")
 
         # check that there is only one uenv name
         if len(set([r.uarch for r in records]))>1:
-            print_error_and_exit("ambiguous uarch")
+            print_records(records)
+            print()
+            print_error_and_exit(f"more than one uarch matches the the requested uenv. Specificy the desired uarch with the --uarch flag")
 
         base = f"jfrog.svc.cscs.ch/uenv/{repo}"
         t = records[0]
         target = f"{t.system}/{t.uarch}/{t.name}/{t.version}"
 
-        print()
         print(f"oras pull -o $SCRATCH/images/{t.name}-{t.version}-{t.uarch}-{t.tag} {base}/{target}:{t.tag}")
+
+        # Call the function
+        run_oras_command(["pull", "-o", f"$SCRATCH/images/{t.name}-{t.version}-{t.uarch}-{t.tag}", f"{base}/{target}:{t.tag}"])
+
 
