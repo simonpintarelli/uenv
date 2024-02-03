@@ -128,4 +128,4 @@ $show sed "s|@@prefix@@|$prefix|g"   -i "$init_path"
 $show sed "s|@@version@@|$version|g" -i "$init_path"
 $show chmod 644 "$init_path"
 
-[[ "$local_install" == "yes" ]] && prompt_bash_update "$prefix" "$always_yes"
+[[ "$local_install" == "yes" ]] && prompt_bash_update "$prefix"/bin/activate-uenv "$always_yes"
