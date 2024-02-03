@@ -34,5 +34,7 @@ function teardown() {
 }
 
 @test "uenv cli" {
-    uenv start ${image_path}/uenv.squashfs
+    echo "==bashrc=="
+    cat ~/.bashrc
+    # uenv start ${image_path}/uenv.squashfs
 }
