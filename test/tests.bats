@@ -32,3 +32,7 @@ function teardown() {
 @test "mount_single_image" {
     squashfs-mount ${image_path}/uenv.sqashfs:/user-environment -- cat /user-environment/file.txt
 }
+
+@test "uenv cli" {
+    uenv start ${image_path}/uenv.squashfs
+}
