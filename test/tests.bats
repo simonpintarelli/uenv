@@ -15,7 +15,7 @@ function setup() {
     echo "=== make a back up of ~/.bashrc -> $base_path/bashrc"
     cp ~/.bashrc "$base_path/bashrc"
 
-    "$repo_path/install" --prefix="$repo_path" --yes
+    "$repo_path/install" --prefix="$repo_path" --local --yes
 
     [[ -d "$base_path/bin" ]] && export PATH="$base_path/bin:$PATH"
     echo "BIN: $(ls $base_path/bin)"
