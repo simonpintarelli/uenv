@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-version=2
+version=3-dev
 
 script_path=$(dirname "$(readlink -f "$BASH_SOURCE")")
 
