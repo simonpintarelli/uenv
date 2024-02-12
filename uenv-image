@@ -190,6 +190,7 @@ def print_records(records):
 class DataStore:
     def __init__(self):
         self.store = {"system": {}, "uarch": {}, "name": {}, "version": {}, "tag": {}}
+        self.images = {}
 
     def add_record(self, record, date, sha256):
         fields = record.split("/")
@@ -199,11 +200,12 @@ class DataStore:
         system, uarch, name, version, tag = fields
         r = Record(system, uarch, name, version, tag, date, sha256)
 
-        self.store["system"] .setdefault(system, []).append(r)
-        self.store["uarch"]  .setdefault(uarch, []).append(r)
-        self.store["name"]   .setdefault(name, []).append(r)
-        self.store["version"].setdefault(version, []).append(r)
-        self.store["tag"]    .setdefault(tag, []).append(r)
+        self.images[sha256] = r
+        self.store["system"] .setdefault(system, []).append(sha256)
+        self.store["uarch"]  .setdefault(uarch, []).append(sha256)
+        self.store["name"]   .setdefault(name, []).append(sha256)
+        self.store["version"].setdefault(version, []).append(sha256)
+        self.store["tag"]    .setdefault(tag, []).append(sha256)
 
     def get_records(self, **constraints):
         if not constraints:
@@ -224,7 +226,8 @@ class DataStore:
         else:
             unique = set()
 
-        results = list(unique)
+        #results = list(unique)
+        results = [self.images[sha] for sha in unique]
         results.sort(reverse=True)
         return results
 
