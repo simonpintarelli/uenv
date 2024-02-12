@@ -100,7 +100,7 @@ else
     prefix="${prefix:-$prefix_system}/uenv"
 fi
 
-[[ "x$uenv_debug" == xyes ]] && show=echo || show=""
+[[ "$uenv_debug" == yes ]] && show=echo || show=""
 
 echo "installing uenv version $version in $prefix"
 echo "local install: $local_install"
