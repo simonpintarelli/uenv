@@ -131,7 +131,6 @@ echo "installing $init_path"
 run install -D -m644 <(
     sed \
         -e "s|@@impl@@|$impl_path|g" \
-        -e "s|@@prefix@@|$prefix|g" \
         -e "s|@@version@@|$version|g" \
         $script_path/activate) \
       $init_path
