@@ -77,6 +77,9 @@ do
         --yes)
         always_yes=yes
         ;;
+        --destdir=*)
+        destdir="${arg#*=}"
+        ;;
         --debug)
         uenv_debug=yes
         ;;
@@ -100,34 +103,39 @@ else
     prefix="${prefix:-$prefix_system}/uenv"
 fi
 
-[[ "$uenv_debug" == yes ]] && show=echo || show=""
+run () {
+    if [  "$uenv_debug" = yes ]; then
+        printf "%q "  "$@"
+        printf "\n"
+    else
+        "$@"
+    fi
+}
 
 echo "installing uenv version $version in $prefix"
 echo "local install: $local_install"
 
-$show mkdir -p "$prefix/libexec"
-$show chmod 755 "$prefix/libexec"
 if [ "$local_install" == "no" ]
 then
-    $show chmod -R 755 "$prefix"
-    init_path="/etc/profile.d/uenv.sh"
+    init_path="${destdir}/etc/profile.d/uenv.sh"
+    impl_path="${destdir}${prefix}/libexec/uenv-impl"
 else
-    $show mkdir -p "$prefix/bin"
-    init_path="$prefix/bin/activate-uenv"
+    init_path="${prefix}/bin/activate-uenv"
+    impl_path="${prefix}/libexec/uenv-impl"
 fi
 
-impl_path="$prefix/libexec/uenv-impl"
 echo "installing $impl_path"
-$show cp "$script_path/uenv-impl" "$impl_path"
-$show sed "s|@@version@@|$version|g" -i "$impl_path"
-$show chmod 755 "$impl_path"
+run install -D -m755 <(sed "s|@@version@@|$version|g" $script_path/uenv-impl) $impl_path
 
-# Copy the initialisation script
 echo "installing $init_path"
-$show cp "$script_path/activate" "$init_path"
-$show sed "s|@@impl@@|$impl_path|g"  -i "$init_path"
-$show sed "s|@@prefix@@|$prefix|g"   -i "$init_path"
-$show sed "s|@@version@@|$version|g" -i "$init_path"
-$show chmod 644 "$init_path"
+run install -D -m644 <(
+    sed \
+        -e "s|@@impl@@|$impl_path|g" \
+        -e "s|@@prefix@@|$prefix|g" \
+        -e "s|@@version@@|$version|g" \
+        $script_path/activate) \
+      $init_path
 
-[[ "$local_install" == "yes" ]] && prompt_bash_update "$prefix" "$always_yes"
+if [[ "$local_install" == "yes" ]]; then
+    prompt_bash_update "$prefix" "$always_yes"
+fi
