@@ -64,7 +64,7 @@ always_yes=no
 local_install=no
 
 # loop over all arguments
-for (( i=1; i<=$arg_count; i++ ))
+for (( i=1; i<=arg_count; i++ ))
 do
     arg=${!i}
     case $arg in
