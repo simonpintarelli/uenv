@@ -44,6 +44,9 @@ def print_error_and_exit(message):
     print(f"{colorize('error', 'red')} {message}", file=sys.stderr)
     exit(1)
 
+def exit_with_success():
+    exit(0)
+
 def make_argparser():
     parser = argparse.ArgumentParser(description=("Interact with the uenv artifactory"))
     parser.add_argument("--no-color", action="store_true",
@@ -60,6 +63,11 @@ def make_argparser():
     find_parser.add_argument("uenv", nargs="?", default=None, type=str)
 
     pull_parser = subparsers.add_parser("pull", help="pull a uenv from the CSCS registry")
+    pull_parser.add_argument("-s", "--system", required=False, type=str)
+    pull_parser.add_argument("-a", "--uarch", required=False, type=str)
+    pull_parser.add_argument("uenv", nargs="?", default=None, type=str)
+
+    pull_parser = subparsers.add_parser("list", help="list cached images")
     pull_parser.add_argument("-s", "--system", required=False, type=str)
     pull_parser.add_argument("-a", "--uarch", required=False, type=str)
     pull_parser.add_argument("uenv", nargs="?", default=None, type=str)
@@ -99,13 +107,14 @@ def get_filter(args):
 
 class Record:
     # build/eiger/zen2/cp2k/2023/1133706947
-    def __init__(self, system, uarch, name, version, tag, date):
+    def __init__(self, system, uarch, name, version, tag, date, sha256):
         self._system  = system
         self._uarch   = uarch
         self._name    = name
         self._version = version
         self._tag     = tag
         self._date    = date
+        self._sha256  = sha256
 
     def to_set(self):
         # don't use date in the set, because date is not used for comparison.
@@ -163,28 +172,32 @@ class Record:
     def tag(self):
         return self._tag
 
+    @property
+    def sha256(self):
+        return self._sha256
+
 # pretty print a list of Record
 def print_records(records):
     if len(records)>0:
-        print(colorize(f"{'uenv/version:tag':40}{'uarch':6}{'date':10}", "yellow"))
+        print(colorize(f"{'uenv/version:tag':40}{'uarch':6}{'date':10} {'sha256':64}", "yellow"))
         for r in records:
             namestr = f"{r.name}/{r.version}"
             tagstr = f"{r.tag}"
             label = namestr + ":" + tagstr
             datestr = r.date.strftime("%Y-%m-%d")
-            print(f"{label:<40}{r.uarch:6}{datestr}")
+            print(f"{label:<40}{r.uarch:6}{datestr:10} {r.sha256:64}")
 
 class DataStore:
     def __init__(self):
         self.store = {"system": {}, "uarch": {}, "name": {}, "version": {}, "tag": {}}
 
-    def add_record(self, record, date):
+    def add_record(self, record, date, sha256):
         fields = record.split("/")
         if len(fields) != 5:
             raise ValueError("Record must have exactly 5 fields")
 
         system, uarch, name, version, tag = fields
-        r = Record(system, uarch, name, version, tag, date)
+        r = Record(system, uarch, name, version, tag, date, sha256)
 
         self.store["system"] .setdefault(system, []).append(r)
         self.store["uarch"]  .setdefault(uarch, []).append(r)
@@ -226,6 +239,7 @@ class DataStore:
 #      "path" : "build/clariden/zen3/prgenv-gnu/23.11/1094139948",
 #      "name" : "manifest.json",
 #      "created" : "2023-12-04T09:05:44.034Z",
+#      "sha256" : "134c04d01bb3583726804a094b144d3637997877ef6162d1fe19eabff3c72c3a",
 #      "stats" : [{
 #        "downloaded" : "2023-12-11T17:56:59.052Z",
 #        "downloads" : 11
@@ -283,78 +297,137 @@ def parse_uenv_string(desc):
 def run_oras_command(args):
     try:
         command = ['oras'] + args
-        print(f"colorize('running oras', 'yellow'): {' '.join(command)}")
-        result = subprocess.run(
-            command,
-            stdout=subprocess.PIPE,  # Capture standard output
-            stderr=subprocess.PIPE,  # Capture standard error
-            check=True,  # Raise exception if command fails
-            encoding='utf-8'  # Decode output from bytes to string
-        )
+        print(f"{colorize('running oras', 'yellow')}: {' '.join(command)}")
+       #result = subprocess.run(
+       #    command,
+       #    stdout=subprocess.PIPE,  # Capture standard output
+       #    stderr=subprocess.PIPE,  # Capture standard error
+       #    check=True,  # Raise exception if command fails
+       #    encoding='utf-8'  # Decode output from bytes to string
+       #)
 
-        # Print standard output
-        print("Output:\n", result.stdout)
+       ## Print standard output
+       #print("Output:\n", result.stdout)
 
     except subprocess.CalledProcessError as e:
         # Print error message along with captured standard error
         print("An error occurred:\n", e.stderr)
 
-if __name__ == "__main__":
-    database = {"build": DataStore(), "deploy": DataStore()}
+# the path used to store a users cached images and meta data
+def uenv_repo_path():
+    # check whether the image path has been explicitly set:
+    path = os.environ.get('UENV_IMAGE_PATH')
+    if path is not None:
+        try:
+            if not os.path.exists(path):
+                os.makedirs(path)
+            return path
+        except Exception as error:
+            # Handle any exception that occurs during the process
+            raise RuntimeError(f"the UENV_IMAGE_PATH={path} could not be accessed or created")
 
+    # if not, try to use the path $SCRATCH/.uenv-images/, if SCRATCH exists
+    path = os.environ.get('SCRATCH')
+    if path is not None:
+        try:
+            path = path + "/.uenv-images"
+            if not os.path.exists(path):
+                os.makedirs(path)
+            return path
+        except Exception as error:
+            # Handle any exception that occurs during the process
+            raise RuntimeError(f"the image path SCRATCH/.uenv-images={path} could not be accessed or created")
+
+    return None
+
+# the path with cached images
+def uenv_image_path():
+    store = uenv_repo_path()
+    if store:
+        return store + "/images"
+    return None
+
+# return the relative path of an image
+def record_path(record):
+    return f"{record.system}/{record.uarch}/{record.name}/{record.version}/{record.tag}"
+
+# the path of the image corresponding to a specific image in the user cache
+def uenv_record_path(record):
+    store = uenv_image_path()
+    if store:
+        return store + "/" + record_path(record)
+    return store
+
+if __name__ == "__main__":
     parser = make_argparser()
     args = parser.parse_args()
 
     global colored_output
     colored_output = use_colored_output(args.no_color)
 
-    raw_records = query_jfrog()
-    for record in raw_records:
-        path = record["path"]
-
-        date = to_datetime(record["created"])
-        if path.startswith("build/"):
-            database["build"].add_record(path[len("build/"):], date)
-        if path.startswith("deploy/"):
-            database["deploy"].add_record(path[len("deploy/"):], date)
-
     # hoist option filtering and parsing the databse
     # outside the find and pull commands
     options = get_options(args)
-    repo, img_filter = get_filter(args)
-    records = database[repo].get_records(**img_filter)
 
-    if args.command == "find":
-        print_records(records)
+    if args.command in ["find", "pull"]:
+        raw_records = query_jfrog()
+        database = {"build": DataStore(), "deploy": DataStore()}
+        for record in raw_records:
+            path = record["path"]
 
-        # verify that there is at least one image that matches the query
-        if len(records)==0:
-            print("no images match the query")
+            date = to_datetime(record["created"])
+            sha256 = record["sha256"]
+            if path.startswith("build/"):
+                database["build"].add_record(path[len("build/"):], date, sha256)
+            if path.startswith("deploy/"):
+                database["deploy"].add_record(path[len("deploy/"):], date, sha256)
 
-    if args.command == "pull":
-        # verify that there is at least one image that matches the query
-        if len(records)==0:
-            print_error_and_exit(f"no images match the query {args.uenv}")
-
-        # check that there is only one uenv name
-        if len(set([r.name for r in records]))>1:
+        repo, img_filter = get_filter(args)
+        records = database[repo].get_records(**img_filter)
+        if args.command == "find":
             print_records(records)
-            print()
-            print_error_and_exit(f"ambiguous uenv {args.uenv}")
 
-        # check that there is only one uenv name
-        if len(set([r.uarch for r in records]))>1:
-            print_records(records)
-            print()
-            print_error_and_exit(f"more than one uarch matches the the requested uenv. Specificy the desired uarch with the --uarch flag")
+            # verify that there is at least one image that matches the query
+            if len(records)==0:
+                print("no images match the query")
 
-        base = f"jfrog.svc.cscs.ch/uenv/{repo}"
-        t = records[0]
-        target = f"{t.system}/{t.uarch}/{t.name}/{t.version}"
+            exit_with_success()
 
-        print(f"oras pull -o $SCRATCH/images/{t.name}-{t.version}-{t.uarch}-{t.tag} {base}/{target}:{t.tag}")
+        if args.command == "pull":
+            # verify that there is at least one image that matches the query
+            if len(records)==0:
+                print_error_and_exit(f"no images match the query {args.uenv}")
 
-        # Call the function
-        run_oras_command(["pull", "-o", f"$SCRATCH/images/{t.name}-{t.version}-{t.uarch}-{t.tag}", f"{base}/{target}:{t.tag}"])
+            # check that there is only one uenv name
+            if len(set([r.name for r in records]))>1:
+                print_records(records)
+                print()
+                print_error_and_exit(f"ambiguous uenv {args.uenv}")
 
+            # check that there is only one uenv name
+            if len(set([r.uarch for r in records]))>1:
+                print_records(records)
+                print()
+                print_error_and_exit(f"more than one uarch matches the the requested uenv. Specificy the desired uarch with the --uarch flag")
+
+            base = f"jfrog.svc.cscs.ch/uenv/{repo}"
+            t = records[0]
+            target = f"{t.system}/{t.uarch}/{t.name}/{t.version}"
+
+            # Call the function
+            path = uenv_record_path(t)
+            if path is not None:
+                print(f"PATH: {colorize(path, 'magenta')}")
+                run_oras_command(["pull", "-o", path, f"{base}/{target}:{t.tag}"])
+
+            else:
+                print_error_and_exit("set UENV_IMAGE_PATH to specify where uenv images should be stored")
+
+            exit_with_success()
+
+    if args.command == "list":
+        repo_path = uenv_image_path()
+        print(f"repo  {colorize(repo_path, 'yellow')}")
+        index_file = repo_path + "/index.json"
+        print(f"index {colorize(index_file, 'yellow')}")
 
