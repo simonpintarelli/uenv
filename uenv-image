@@ -116,14 +116,14 @@ class Record:
         self._date    = date
         self._sha256  = sha256
 
-    def to_set(self):
-        # don't use date in the set, because date is not used for comparison.
-        return (self._system, self._uarch, self._name, self._version, self._tag)
+    #def to_set(self):
+        ## don't use date in the set, because date is not used for comparison.
+        #return (self._system, self._uarch, self._name, self._version, self._tag)
 
     def __eq__(self, other):
         if not isinstance(other, Record):
             return False
-        return self.to_set==other.to_set()
+        return self.sha256==other.sha256
 
     def __lt__(self, other):
         if self.system  < other.system: return True
@@ -138,9 +138,8 @@ class Record:
         #if other.tag    < self.tag: return False
         return False
 
-
-    def __hash__(self):
-        return hash(self.to_set())
+    #def __hash__(self):
+        #return hash(self.to_set())
 
     def __str__(self):
         return f"{self.name}/{self.version}:{self.tag} @ {self.system}:{self.uarch}"
