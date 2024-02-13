@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-version=3-dev
+
+set -euo pipefail
 
 script_path=$(dirname "$(readlink -f "$BASH_SOURCE")")
+version=(cat "$script_path/VERSION")
 
 function usage {
     echo "uenv installer"
@@ -62,6 +64,9 @@ always_yes=no
 
 # default install system wide
 local_install=no
+
+# dry-run (systemwide install only)
+uenv_debug=no
 
 # loop over all arguments
 for (( i=1; i<=arg_count; i++ ))
