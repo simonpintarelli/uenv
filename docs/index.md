@@ -2,10 +2,10 @@ A command line interface for interacting with user environments on Alps at CSCS.
 
 ## Getting uenv
 
-uenv can be installed loacally by cloning the repository and running the installation script
+uenv will be installed system wide for all users on some CSCS Alps systems. If it is not installed, you can install a local copy by cloning the repository and running the installation script:
 
 ```bash
-git clone git@github.com:eth-cscs/uenv.git && ./uenv/install
+git clone git@github.com:eth-cscs/uenv.git && ./uenv/install --local
 ```
 
 For uenv to be available on the command line, an activation script has to be sourced, for which we recommend adding a line to your `~/.bashrc`.
