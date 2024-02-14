@@ -1,7 +1,6 @@
 # only run if bash or zsh
 [ -n "${BASH_VERSION:-}" -o -n "${ZSH_VERSION:-}" ] || return 0
 
-export UENV_ROOT=@@prefix@@
 export UENV_CMD=@@impl@@
 export UENV_VERSION=@@version@@
 
