@@ -3,7 +3,7 @@
 set -euo pipefail
 
 script_path=$(dirname "$(readlink -f "$BASH_SOURCE")")
-version=(cat "$script_path/VERSION")
+version=$(cat "$script_path/VERSION")
 
 function usage {
     echo "uenv installer"
@@ -93,11 +93,11 @@ do
         exit 0
         ;;
         *)
-        echo "Error: unknown argument $arg"
-        echo
-        usage
-        exit 1
-        ;;
+            echo "Error: unknown argument $arg"
+            echo
+            usage
+            exit 1
+            ;;
     esac
 done
 
@@ -123,14 +123,17 @@ echo "local install: $local_install"
 if [ "$local_install" == "no" ]
 then
     init_path="${destdir}/etc/profile.d/uenv.sh"
-    impl_path="${destdir}${prefix}/libexec/uenv-impl"
+    impl_path="${prefix}/libexec/uenv-impl"
+    impl_path_install="${destdir}/${impl_path}"
+
 else
     init_path="${prefix}/bin/activate-uenv"
     impl_path="${prefix}/libexec/uenv-impl"
+    impl_path_install="${impl_path}"
 fi
 
 echo "installing $impl_path"
-run install -D -m755 <(sed "s|@@version@@|$version|g" $script_path/uenv-impl) $impl_path
+run install -D -m755 <(sed "s|@@version@@|$version|g" $script_path/uenv-impl) $impl_path_install
 
 echo "installing $init_path"
 run install -D -m644 <(
