@@ -18,5 +18,5 @@ A command line interface for interacting with user environments on Alps at CSCS.
 ./install --yes --destdir=%{buildroot} --prefix=/opt/cscs
 
 %files
-/opt/cscs/uenv
+/opt/cscs/uenv/
 /etc/profile.d/uenv.sh
