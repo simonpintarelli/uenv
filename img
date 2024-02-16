@@ -3,6 +3,7 @@
 # for handling http requests with the middleware
 import argparse
 from datetime import datetime, timezone
+import json
 import os
 import requests
 import subprocess
@@ -253,7 +254,7 @@ class DataStore:
         self.store["version"].setdefault(r.version, []).append(sha)
         self.store["tag"]    .setdefault(r.tag, []).append(sha)
 
-    def get_records(self, **constraints):
+    def find_records(self, **constraints):
         if not constraints:
             raise ValueError("At least one constraint must be provided")
 
@@ -276,6 +277,9 @@ class DataStore:
         results.sort(reverse=True)
         return results
 
+    def get_record(self, sha256: str) -> Record:
+        return self.images.get(sha256, None)
+
     # Convert to a dictionary that can be written to file as JSON
     # The serialisation and deserialisation are central: able to represent
     # uenv that are available in both JFrog and filesystem directory tree.
@@ -291,7 +295,7 @@ class DataStore:
     @classmethod
     def deserialise(cls, datastore):
         result = cls()
-        for img in raw["images"]:
+        for img in datastore["images"]:
             result.add_record(Record.from_dictionary(img))
 
 class FilesystemCache():
@@ -300,15 +304,29 @@ class FilesystemCache():
         self._index = path + "/index.json"
         self._index_lock = path + "/index.lock"
 
-        if not create and not os.path.exists(self._path):
-            raise # error: cache does not exists
-        else:
-            # create the path
+        if not os.path.exists(self._path):
+            if not create:
+                # error: cache does not exists
+                raise FileNotFoundError(f"index fix {self._path}")
+            else:
+                os.makedirs(self._path)
 
-        if not create and not os.path.exists(path._index):
-            raise # error: cache does not exists
-        else:
-            # create the path
+        if not os.path.exists(self._index):
+            if not create:
+                # error: index does not exists
+                raise FileNotFoundError(f"index fix {self._index}")
+            else:
+                empty_config = { "API_VERSION": UENV_CLI_API_VERSION, "images": [] }
+                with open(self._index, "w") as f:
+                    # default serialisation is str to serialise the pathlib.PosixPath
+                    f.write(json.dumps(empty_config, sort_keys=True, indent=2, default=str))
+                    f.write("\n")
+
+                self._database = DataStore.deserialise(empty_config)
+                return
+
+        with open(self._index, "r") as fid:
+            self._database = json.loads(fid.read())
 
     def clear_lock(self):
         return None;
@@ -327,8 +345,13 @@ class FilesystemCache():
         self._database.add_record(record)
 
     def image_path(self, sha256: str):
-        return self._database.get_sha256(sha)
+        return self._database.get_record(sha)
 
+    #def validate_index(self):
+        #return None
+
+    #def re_index(self):
+        #return None
 
 
 # The https://cicd-ext-mw.cscs.ch/uenv/list API endpoint returns
@@ -505,7 +528,7 @@ if __name__ == "__main__":
         database = {"build": build, "deploy": deploy}
 
         repo, img_filter = get_filter(args)
-        records = database[repo].get_records(**img_filter)
+        records = database[repo].find_records(**img_filter)
 
         if args.command == "find":
             print_records(records)
@@ -559,6 +582,6 @@ if __name__ == "__main__":
     if args.command == "list":
         repo_path = uenv_image_path()
         print(f"repo  {colorize(repo_path, 'yellow')}")
-        index_file = repo_path + "/index.json"
-        print(f"index {colorize(index_file, 'yellow')}")
+        cache = FilesystemCache(repo_path, create=True)
+        print(cache.database)
 
