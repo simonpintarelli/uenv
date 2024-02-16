@@ -105,9 +105,10 @@ def get_filter(args):
 
     return repo, img_filter
 
+
 class Record:
-    # build/eiger/zen2/cp2k/2023/1133706947
-    def __init__(self, system, uarch, name, version, tag, date, size_bytes, sha256):
+
+    def __init__(self, system: str, uarch: str, name: str, version: str, tag: str, date: str, size_bytes: int, sha256: str):
         self._system  = system
         self._uarch   = uarch
         self._name    = name
@@ -117,9 +118,15 @@ class Record:
         self._bytes   = size_bytes
         self._sha256  = sha256
 
-    #def to_set(self):
-        ## don't use date in the set, because date is not used for comparison.
-        #return (self._system, self._uarch, self._name, self._version, self._tag)
+    # build/eiger/zen2/cp2k/2023/1133706947
+    @classmethod
+    def frompath(cls, path: str, date: str, size_bytes: int, sha256: str):
+        fields = path.split("/")
+        if len(fields) != 5:
+            raise ValueError("Record must have exactly 5 fields")
+
+        system, uarch, name, version, tag = fields
+        return cls(system, uarch, name, version, tag, date, size_bytes, sha256)
 
     def __eq__(self, other):
         if not isinstance(other, Record):
@@ -138,9 +145,6 @@ class Record:
         if self.tag     < other.tag: return True
         #if other.tag    < self.tag: return False
         return False
-
-    #def __hash__(self):
-        #return hash(self.to_set())
 
     def __str__(self):
         return f"{self.name}/{self.version}:{self.tag} @ {self.system}:{self.uarch}"
@@ -183,6 +187,10 @@ class Record:
     @property
     def datestring(self):
         return self.date.strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
+
+    @property
+    def path(self):
+        return f"{self.system}/{self.uarch}/{self.name}{self.version}/{self.tag}"
 
     @property
     def dictionary(self):
@@ -230,20 +238,17 @@ class DataStore:
 
         self.store = {"system": {}, "uarch": {}, "name": {}, "version": {}, "tag": {}}
 
-    def add_record(self, record, date, size, sha256):
-        fields = record.split("/")
-        if len(fields) != 5:
-            raise ValueError("Record must have exactly 5 fields")
-
-        system, uarch, name, version, tag = fields
-        r = Record(system, uarch, name, version, tag, date, size, sha256)
+    def add_record(self, r: Record, overwrite: bool = False):
+        # test for collisions
+        if (not overwrite) and (self.images.get(r.sha256, None) is not None):
+            raise ValueError(f"an image with the hash {r.sha256} already exists")
 
         self.images[sha256] = r
-        self.store["system"] .setdefault(system, []).append(sha256)
-        self.store["uarch"]  .setdefault(uarch, []).append(sha256)
-        self.store["name"]   .setdefault(name, []).append(sha256)
-        self.store["version"].setdefault(version, []).append(sha256)
-        self.store["tag"]    .setdefault(tag, []).append(sha256)
+        self.store["system"] .setdefault(r.system, []).append(sha256)
+        self.store["uarch"]  .setdefault(r.uarch, []).append(sha256)
+        self.store["name"]   .setdefault(r.name, []).append(sha256)
+        self.store["version"].setdefault(r.version, []).append(sha256)
+        self.store["tag"]    .setdefault(r.tag, []).append(sha256)
 
     def get_records(self, **constraints):
         if not constraints:
@@ -280,6 +285,7 @@ class DataStore:
 #      "path" : "build/clariden/zen3/prgenv-gnu/23.11/1094139948",
 #      "name" : "manifest.json",
 #      "created" : "2023-12-04T09:05:44.034Z",
+#      "size" : "123683707",
 #      "sha256" : "134c04d01bb3583726804a094b144d3637997877ef6162d1fe19eabff3c72c3a",
 #      "stats" : [{
 #        "downloaded" : "2023-12-11T17:56:59.052Z",
@@ -305,9 +311,26 @@ def query_jfrog():
         response = requests.get(url)
         response.raise_for_status()
 
-        data = response.json()
+        raw_records = response.json()
 
-        return data["results"]
+        deploy_database = DataStore()
+        build_database = DataStore()
+
+        for record in raw_records:
+            path = record["path"]
+
+            date = to_datetime(record["created"])
+            sha256 = record["sha256"]
+            size = record["size"]
+            if path.startswith("build/"):
+                r = Record.frompath(path[len("build/"):], date, size, sha256)
+                build_database.add_record(r)
+            if path.startswith("deploy/"):
+                r = Record.frompath(path[len("deploy/"):], date, size, sha256)
+                deploy_database.add_record(r)
+
+
+        return deploy_database, build_database
 
     except error:
         raise RuntimeError("unable to access the JFrog uenv API.")
@@ -424,18 +447,8 @@ if __name__ == "__main__":
     options = get_options(args)
 
     if args.command in ["find", "pull"]:
-        raw_records = query_jfrog()
-        database = {"build": DataStore(), "deploy": DataStore()}
-        for record in raw_records:
-            path = record["path"]
-
-            date = to_datetime(record["created"])
-            sha256 = record["sha256"]
-            size = record["size"]
-            if path.startswith("build/"):
-                database["build"].add_record(path[len("build/"):], date, size, sha256)
-            if path.startswith("deploy/"):
-                database["deploy"].add_record(path[len("deploy/"):], date, size, sha256)
+        deploy, build = query_jfrog()
+        database = {"build": build, "deploy": deploy}
 
         repo, img_filter = get_filter(args)
         records = database[repo].get_records(**img_filter)
@@ -463,7 +476,9 @@ if __name__ == "__main__":
             if len(set([r.uarch for r in records]))>1:
                 print_records(records)
                 print()
-                print_error_and_exit(f"more than one uarch matches the the requested uenv. Specificy the desired uarch with the --uarch flag")
+                print_error_and_exit(
+                        "more than one uarch matches the the requested uenv. "
+                        "Specify the desired uarch with the --uarch flag")
 
             base = f"jfrog.svc.cscs.ch/uenv/{repo}"
             t = records[0]
@@ -481,7 +496,8 @@ if __name__ == "__main__":
                 print(f"  ... available at {path}/store.squashfs")
 
             else:
-                print_error_and_exit("set UENV_IMAGE_PATH to specify where uenv images should be stored")
+                print_error_and_exit(
+                        "set UENV_IMAGE_PATH to specify where uenv images should be stored")
 
             exit_with_success()
 
