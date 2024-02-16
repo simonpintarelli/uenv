@@ -107,13 +107,14 @@ def get_filter(args):
 
 class Record:
     # build/eiger/zen2/cp2k/2023/1133706947
-    def __init__(self, system, uarch, name, version, tag, date, sha256):
+    def __init__(self, system, uarch, name, version, tag, date, size_bytes, sha256):
         self._system  = system
         self._uarch   = uarch
         self._name    = name
         self._version = version
         self._tag     = tag
         self._date    = date
+        self._bytes   = size_bytes
         self._sha256  = sha256
 
     #def to_set(self):
@@ -175,29 +176,67 @@ class Record:
     def sha256(self):
         return self._sha256
 
+    @property
+    def size(self):
+        return self._bytes
+
+    @property
+    def datestring(self):
+        return self.date.strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
+
+    @property
+    def dictionary(self):
+        return {
+                "system": self.system,
+                "uarch": self.uarch,
+                "name": self.name,
+                "date": self.datestring,
+                "version": self.version,
+                "tag": self.tag,
+                "sha256": self.sha256,
+                "size": self.size
+               }
+
+def relative_path_from_record(record):
+    return f"{record.sha256}"
+
+def relative_jfrog_from_record(record):
+    return f"{record.system}/{record.uarch}/{record.name}/{record.version}:{record.tag}"
+
 # pretty print a list of Record
 def print_records(records):
     if len(records)>0:
-        print(colorize(f"{'uenv/version:tag':40}{'uarch':6}{'date':10} {'sha256':64}", "yellow"))
+        print(colorize(f"{'uenv/version:tag':40}{'uarch':6}{'date':10} {'sha256':16} {'size':<10}", "yellow"))
         for r in records:
             namestr = f"{r.name}/{r.version}"
             tagstr = f"{r.tag}"
             label = namestr + ":" + tagstr
             datestr = r.date.strftime("%Y-%m-%d")
-            print(f"{label:<40}{r.uarch:6}{datestr:10} {r.sha256:64}")
+            S = r.size
+            if S<1024:
+                size_str = f"{S:<} bytes"
+            elif S<1024*1024:
+                size_str = f"{(S/1024):<.0f} kB"
+            elif S<1024*1024*1024:
+                size_str = f"{(S/(1024*1024)):<.0f} MB"
+            else:
+                size_str = f"{(S/(1024*1024*1024)):<.1f} GB"
+            print(f"{label:<40}{r.uarch:6}{datestr:10} {r.sha256[:16]:16} {size_str:<10}")
 
 class DataStore:
     def __init__(self):
-        self.store = {"system": {}, "uarch": {}, "name": {}, "version": {}, "tag": {}}
+        # all images store with (key,value) = (sha256,Record)
         self.images = {}
 
-    def add_record(self, record, date, sha256):
+        self.store = {"system": {}, "uarch": {}, "name": {}, "version": {}, "tag": {}}
+
+    def add_record(self, record, date, size, sha256):
         fields = record.split("/")
         if len(fields) != 5:
             raise ValueError("Record must have exactly 5 fields")
 
         system, uarch, name, version, tag = fields
-        r = Record(system, uarch, name, version, tag, date, sha256)
+        r = Record(system, uarch, name, version, tag, date, size, sha256)
 
         self.images[sha256] = r
         self.store["system"] .setdefault(system, []).append(sha256)
@@ -299,17 +338,19 @@ def parse_uenv_string(desc):
 def run_oras_command(args):
     try:
         command = ['oras'] + args
-        print(f"{colorize('running oras', 'yellow')}: {' '.join(command)}")
-       #result = subprocess.run(
-       #    command,
-       #    stdout=subprocess.PIPE,  # Capture standard output
-       #    stderr=subprocess.PIPE,  # Capture standard error
-       #    check=True,  # Raise exception if command fails
-       #    encoding='utf-8'  # Decode output from bytes to string
-       #)
 
-       ## Print standard output
-       #print("Output:\n", result.stdout)
+        #print(f"{colorize('running oras', 'yellow')}: {' '.join(command)}")
+
+        result = subprocess.run(
+            command,
+            stdout=subprocess.PIPE,  # Capture standard output
+            stderr=subprocess.PIPE,  # Capture standard error
+            check=True,  # Raise exception if command fails
+            encoding='utf-8'  # Decode output from bytes to string
+        )
+
+        # Print standard output
+        print("Output:\n", result.stdout)
 
     except subprocess.CalledProcessError as e:
         # Print error message along with captured standard error
@@ -346,7 +387,15 @@ def uenv_repo_path():
 def uenv_image_path():
     store = uenv_repo_path()
     if store:
-        return store + "/images"
+        path = store + "/images"
+        try:
+            if not os.path.exists(path):
+                os.makedirs(path)
+            return store
+        except Exception as error:
+            # Handle any exception that occurs during the process
+            raise RuntimeError(f"the UENV_IMAGE_PATH={path} could not be accessed or created")
+        return path
     return None
 
 # return the relative path of an image
@@ -357,7 +406,7 @@ def record_path(record):
 def uenv_record_path(record):
     store = uenv_image_path()
     if store:
-        return store + "/" + record_path(record)
+        return store + "/images/" + relative_path_from_record(record)
     return store
 
 if __name__ == "__main__":
@@ -379,10 +428,11 @@ if __name__ == "__main__":
 
             date = to_datetime(record["created"])
             sha256 = record["sha256"]
+            size = record["size"]
             if path.startswith("build/"):
-                database["build"].add_record(path[len("build/"):], date, sha256)
+                database["build"].add_record(path[len("build/"):], date, size, sha256)
             if path.startswith("deploy/"):
-                database["deploy"].add_record(path[len("deploy/"):], date, sha256)
+                database["deploy"].add_record(path[len("deploy/"):], date, size, sha256)
 
         repo, img_filter = get_filter(args)
         records = database[repo].get_records(**img_filter)
@@ -414,13 +464,18 @@ if __name__ == "__main__":
 
             base = f"jfrog.svc.cscs.ch/uenv/{repo}"
             t = records[0]
-            target = f"{t.system}/{t.uarch}/{t.name}/{t.version}"
+            jfrog_address = f"{base}/{relative_jfrog_from_record(t)}"
+
+            print(f"{t} from {jfrog_address} {t.size/(1024*1024):.0f} MB")
+            fs_path = uenv_record_path(t)
+            print(f"{fs_path}")
+            print(f"{t.dictionary}")
 
             # Call the function
-            path = uenv_record_path(t)
-            if path is not None:
-                print(f"PATH: {colorize(path, 'magenta')}")
-                run_oras_command(["pull", "-o", path, f"{base}/{target}:{t.tag}"])
+            if fs_path is not None:
+                if not os.path.exists(fs_path):
+                    run_oras_command(["pull", "-o", fs_path, jfrog_address])
+                print(f"  ... available at {path}/store.squashfs")
 
             else:
                 print_error_and_exit("set UENV_IMAGE_PATH to specify where uenv images should be stored")
