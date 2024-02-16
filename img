@@ -412,6 +412,9 @@ def uenv_record_path(record):
 if __name__ == "__main__":
     parser = make_argparser()
     args = parser.parse_args()
+    if args.command is None:
+        parser.print_help()
+        sys.exit()
 
     global colored_output
     colored_output = use_colored_output(args.no_color)
