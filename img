@@ -3,6 +3,8 @@
 # for handling http requests with the middleware
 import argparse
 from datetime import datetime, timezone
+from enum import Enum
+import fcntl
 import json
 import os
 import requests
@@ -108,6 +110,33 @@ def get_filter(args):
 
     return repo, img_filter
 
+class LockType(Enum):
+    READ = 1
+    WRITE = 2
+
+class Lock():
+    def __init__(self, path: str, type: LockType):
+        self._lockfile = f"{path}.lock"
+
+        # open the file
+        self._lock = open(self._lockfile, "a")
+
+        # acquire lock
+        self._type = type
+        if self._type==LockType.READ:
+            # acquire shared lock
+            fcntl.flock(self._lock, fcntl.LOCK_SH)
+        else:
+            # acquire exclusive lock
+            fcntl.flock(self._lock, fcntl.LOCK_EX)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, exc_traceback):
+        fcntl.flock(self._lock, fcntl.LOCK_UN)  # Release the lock
+        self._lock.close()
+
 
 class Record:
 
@@ -129,6 +158,20 @@ class Record:
             raise ValueError("Record must have exactly 5 fields")
 
         system, uarch, name, version, tag = fields
+        return cls(system, uarch, name, version, tag, date, size_bytes, sha256)
+
+    @classmethod
+    def fromjson(cls, raw: dict):
+        print(raw)
+        system = raw["system"]
+        uarch = raw["uarch"]
+        name = raw["name"]
+        version = raw["version"]
+        tag = raw["tag"]
+        date = raw["date"]
+        size_bytes = raw["size_bytes"]
+        sha256 = raw["sha256"]
+
         return cls(system, uarch, name, version, tag, date, size_bytes, sha256)
 
     def __eq__(self, other):
@@ -298,44 +341,36 @@ class DataStore:
         for img in datastore["images"]:
             result.add_record(Record.from_dictionary(img))
 
-class FilesystemCache():
+class FileSystemCache():
     def __init__(self, path: str, create: bool=False):
         self._path = path
         self._index = path + "/index.json"
-        self._index_lock = path + "/index.lock"
-
-        if not os.path.exists(self._path):
-            if not create:
-                # error: cache does not exists
-                raise FileNotFoundError(f"index fix {self._path}")
-            else:
-                os.makedirs(self._path)
 
         if not os.path.exists(self._index):
-            if not create:
-                # error: index does not exists
-                raise FileNotFoundError(f"index fix {self._index}")
-            else:
-                empty_config = { "API_VERSION": UENV_CLI_API_VERSION, "images": [] }
-                with open(self._index, "w") as f:
-                    # default serialisation is str to serialise the pathlib.PosixPath
-                    f.write(json.dumps(empty_config, sort_keys=True, indent=2, default=str))
-                    f.write("\n")
-
-                self._database = DataStore.deserialise(empty_config)
-                return
+            # error: cache does not exists
+            raise FileNotFoundError(f"filesystem cache not found {self._path}")
 
         with open(self._index, "r") as fid:
-            self._database = json.loads(fid.read())
+            raw = json.loads(fid.read())
+            self._database = DataStore()
+            for img in raw["images"]:
+                self._database.add_record(Record(img))
 
-    def clear_lock(self):
-        return None;
+    @staticmethod
+    def create_if_missing(path: str):
+        if not os.path.exists(path):
+            # LOG: f"FileSyStemCache: creating path {path}"
+            os.makedirs(path)
+        index_file = f"{path}/index.json"
+        if not os.path.exists(index_file):
+            # LOG: f"FileSyStemCache: creating empty index {index_file}"
+            empty_config = { "API_VERSION": UENV_CLI_API_VERSION, "images": [] }
+            with open(index_file, "w") as f:
+                # default serialisation is str to serialise the pathlib.PosixPath
+                f.write(json.dumps(empty_config, sort_keys=True, indent=2, default=str))
+                f.write("\n")
 
-    def lock(self):
-        return None;
-
-    def unlock(self):
-        return None;
+        # LOG: f"FileSyStemCache: available {index_file}"
 
     @property
     def database(self):
@@ -344,15 +379,21 @@ class FilesystemCache():
     def add_record(self, record: Record):
         self._database.add_record(record)
 
-    def image_path(self, sha256: str):
-        return self._database.get_record(sha)
+    # The path where an image would be stored
+    # will return a path even for images that are not stored
+    def image_path(self, r: Record) -> str:
+        return self._path + "/images/" + r.path
 
-    #def validate_index(self):
-        #return None
+    # Return the full record for a given hash
+    # Returns None if no image with that hash is stored in the repo.
+    def get_record(self, sha256: str):
+        return self._database.get_record(sha256)
 
-    #def re_index(self):
-        #return None
-
+    def publish(self):
+        with open(self._index, "w") as f:
+            # default serialisation is str to serialise the pathlib.PosixPath
+            f.write(json.dumps(self._database.serialise(), sort_keys=True, indent=2, default=str))
+            f.write("\n")
 
 # The https://cicd-ext-mw.cscs.ch/uenv/list API endpoint returns
 # a list of images in the jfrog uenv.
@@ -414,17 +455,17 @@ def query_jfrog() -> tuple:
     except Exception as error:
         raise RuntimeError("unable to access the JFrog uenv API.")
 
-def to_datetime(string):
+def to_datetime(date: str):
     # In Python 3.6, datetime.fromisoformat is not available.
     # Manually parsing the string.
     dt_format = '%Y-%m-%dT%H:%M:%S.%fZ'
-    return datetime.strptime(string, dt_format).replace(tzinfo=timezone.utc)
+    return datetime.strptime(date, dt_format).replace(tzinfo=timezone.utc)
 
 # return dictionary {"name", "version", "tag"} from a uenv description string
 #       "prgenv_gnu"              -> ("prgenv_gnu", None, None)
 #       "prgenv_gnu/23.11"        -> ("prgenv_gnu", "23.11", None)
 #       "prgenv_gnu/23.11:latest" -> ("prgenv_gnu", "23.11", "latest")
-def parse_uenv_string(desc):
+def parse_uenv_string(desc: str) -> dict:
     name = version = tag = None
 
     if desc:
@@ -463,41 +504,13 @@ def uenv_repo_path():
     # check whether the image path has been explicitly set:
     path = os.environ.get('UENV_IMAGE_PATH')
     if path is not None:
-        try:
-            if not os.path.exists(path):
-                os.makedirs(path)
-            return path
-        except Exception as error:
-            # Handle any exception that occurs during the process
-            raise RuntimeError(f"the UENV_IMAGE_PATH={path} could not be accessed or created")
+        return path
 
     # if not, try to use the path $SCRATCH/.uenv-images/, if SCRATCH exists
     path = os.environ.get('SCRATCH')
     if path is not None:
-        try:
-            path = path + "/.uenv-images"
-            if not os.path.exists(path):
-                os.makedirs(path)
-            return path
-        except Exception as error:
-            # Handle any exception that occurs during the process
-            raise RuntimeError(f"the image path SCRATCH/.uenv-images={path} could not be accessed or created")
-
-    return None
-
-# the path with cached images
-def uenv_image_path():
-    store = uenv_repo_path()
-    if store:
-        path = store + "/images"
-        try:
-            if not os.path.exists(path):
-                os.makedirs(path)
-            return store
-        except Exception as error:
-            # Handle any exception that occurs during the process
-            raise RuntimeError(f"the UENV_IMAGE_PATH={path} could not be accessed or created")
         return path
+
     return None
 
 # return the relative path of an image
@@ -523,8 +536,8 @@ if __name__ == "__main__":
 
     if args.command in ["find", "pull"]:
         deploy, build = query_jfrog()
-        print(deploy.serialise())
-        print(build.serialise())
+        #print(deploy.serialise())
+        #print(build.serialise())
         database = {"build": build, "deploy": deploy}
 
         repo, img_filter = get_filter(args)
@@ -563,25 +576,41 @@ if __name__ == "__main__":
             jfrog_address = f"{base}/{relative_jfrog_from_record(t)}"
 
             print(f"{t} from {jfrog_address} {t.size/(1024*1024):.0f} MB")
-            fs_path = uenv_record_path(t)
-            print(f"{fs_path}")
-            print(f"{t.dictionary}")
 
-            # Call the function
-            if fs_path is not None:
-                if not os.path.exists(fs_path):
-                    run_oras_command(["pull", "-o", fs_path, jfrog_address])
+            repo_path = uenv_repo_path()
+            with Lock(f"{repo_path}/index.json", LockType.READ) as lk:
+                cache = FileSystemCache(repo_path)
+                print(cache.database)
+                print(f"{t.dictionary}")
+
+                base_path = cache.image_path(t)
+                image_path = base_path + "/store.squashfs"
+                print(f"{base_path}")
+                print(f"{image_path}")
+
+                # if the record isn't already in the filesystem repo download it
+                if cache.get_record(t.sha256) is None:
+                    print(f"  downloading {t.sha256}")
+                    run_oras_command(["pull", "-o", base_path, jfrog_address])
                 print(f"  ... available at {path}/store.squashfs")
 
-            else:
-                print_error_and_exit(
-                        "set UENV_IMAGE_PATH to specify where uenv images should be stored")
+            #else:
+                #print_error_and_exit("set UENV_IMAGE_PATH to specify where uenv images should be stored")
 
             exit_with_success()
 
     if args.command == "list":
-        repo_path = uenv_image_path()
+        repo_path = uenv_repo_path()
         print(f"repo  {colorize(repo_path, 'yellow')}")
-        cache = FilesystemCache(repo_path, create=True)
-        print(cache.database)
+        #cache = FileSystemCache(repo_path, create=True)
+        #print(cache.database)
+
+        try:
+            FileSystemCache.create_if_missing(repo_path)
+        except Exception as err:
+            print_error_and_exit(f"unable to find or initialise the local registry: {str(err)}")
+
+        with Lock(f"{repo_path}/index.json", LockType.READ) as lk:
+            fscache = FileSystemCache(repo_path)
+            print(fscache.database)
 
