@@ -279,12 +279,10 @@ class DataStore:
     # Convert to a dictionary that can be written to file as JSON
     # The serialisation and deserialisation are central: able to represent
     # uenv that are available in both JFrog and filesystem directory tree.
-    def serialise(self, name: str, description: str, version: int=UENV_CLI_API_VERSION):
+    def serialise(self, version: int=UENV_CLI_API_VERSION):
         return {
-                "name": name,
-                "description": description,
-                "version": version,
-                "images": [img.dicionary for img in self.images]
+                "API_VERSION": version,
+                "images": [img.dictionary for img in self.images.values()]
         }
 
     # Convert to a dictionary that can be written to file as JSON
@@ -295,6 +293,43 @@ class DataStore:
         result = cls()
         for img in raw["images"]:
             result.add_record(Record.from_dictionary(img))
+
+class FilesystemCache():
+    def __init__(self, path: str, create: bool=False):
+        self._path = path
+        self._index = path + "/index.json"
+        self._index_lock = path + "/index.lock"
+
+        if not create and not os.path.exists(self._path):
+            raise # error: cache does not exists
+        else:
+            # create the path
+
+        if not create and not os.path.exists(path._index):
+            raise # error: cache does not exists
+        else:
+            # create the path
+
+    def clear_lock(self):
+        return None;
+
+    def lock(self):
+        return None;
+
+    def unlock(self):
+        return None;
+
+    @property
+    def database(self):
+        return self._database
+
+    def add_record(self, record: Record):
+        self._database.add_record(record)
+
+    def image_path(self, sha256: str):
+        return self._database.get_sha256(sha)
+
+
 
 # The https://cicd-ext-mw.cscs.ch/uenv/list API endpoint returns
 # a list of images in the jfrog uenv.
@@ -463,16 +498,15 @@ if __name__ == "__main__":
     global colored_output
     colored_output = use_colored_output(args.no_color)
 
-    # hoist option filtering and parsing the databse
-    # outside the find and pull commands
-    options = get_options(args)
-
     if args.command in ["find", "pull"]:
         deploy, build = query_jfrog()
+        print(deploy.serialise())
+        print(build.serialise())
         database = {"build": build, "deploy": deploy}
 
         repo, img_filter = get_filter(args)
         records = database[repo].get_records(**img_filter)
+
         if args.command == "find":
             print_records(records)
 
