@@ -8,6 +8,8 @@ import requests
 import subprocess
 import sys
 
+UENV_CLI_API_VERSION=1
+
 # Choose whether to use colored output.
 # - by default colored output is ON
 # - if the flag --no-color is passed it is OFF
@@ -269,10 +271,34 @@ class DataStore:
         else:
             unique = set()
 
-        #results = list(unique)
         results = [self.images[sha] for sha in unique]
         results.sort(reverse=True)
         return results
+
+    # Convert to a dictionary that can be written to file as JSON
+    # The serialisation and deserialisation are central: able to represent
+    # uenv that are available in both JFrog and filesystem directory tree.
+    def serialise(self, name: str, description: str, version: int=UENV_CLI_API_VERSION):
+        return {
+                "name": name,
+                "description": description,
+                "version": version,
+                "images": [img.dicionary for img in self.images]
+        }
+
+    # Convert to a dictionary that can be written to file as JSON
+    # The serialisation and deserialisation are central: able to represent
+    # uenv that are available in both JFrog and filesystem directory tree.
+    @classmethod
+    def deserialise(cls, datastore):
+        result = cls()
+        for img in 
+        return {
+                "name": name,
+                "description": description,
+                "version": version,
+                "images": [i.dicionary for i in self.images]
+        }
 
 # The https://cicd-ext-mw.cscs.ch/uenv/list API endpoint returns
 # a list of images in the jfrog uenv.
