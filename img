@@ -245,12 +245,13 @@ class DataStore:
         if (not overwrite) and (self.images.get(r.sha256, None) is not None):
             raise ValueError(f"an image with the hash {r.sha256} already exists")
 
-        self.images[sha256] = r
-        self.store["system"] .setdefault(r.system, []).append(sha256)
-        self.store["uarch"]  .setdefault(r.uarch, []).append(sha256)
-        self.store["name"]   .setdefault(r.name, []).append(sha256)
-        self.store["version"].setdefault(r.version, []).append(sha256)
-        self.store["tag"]    .setdefault(r.tag, []).append(sha256)
+        sha = r.sha256
+        self.images[sha] = r
+        self.store["system"] .setdefault(r.system, []).append(sha)
+        self.store["uarch"]  .setdefault(r.uarch, []).append(sha)
+        self.store["name"]   .setdefault(r.name, []).append(sha)
+        self.store["version"].setdefault(r.version, []).append(sha)
+        self.store["tag"]    .setdefault(r.tag, []).append(sha)
 
     def get_records(self, **constraints):
         if not constraints:
@@ -292,13 +293,8 @@ class DataStore:
     @classmethod
     def deserialise(cls, datastore):
         result = cls()
-        for img in 
-        return {
-                "name": name,
-                "description": description,
-                "version": version,
-                "images": [i.dicionary for i in self.images]
-        }
+        for img in raw["images"]:
+            result.add_record(Record.from_dictionary(img))
 
 # The https://cicd-ext-mw.cscs.ch/uenv/list API endpoint returns
 # a list of images in the jfrog uenv.
@@ -328,9 +324,8 @@ class DataStore:
 #  }
 #}
 #
-# The query_jfrog function returns the "results" array in this response
 
-def query_jfrog():
+def query_jfrog() -> tuple:
     try:
         # GET request to the middleware
         url = "https://cicd-ext-mw.cscs.ch/uenv/list"
@@ -342,7 +337,7 @@ def query_jfrog():
         deploy_database = DataStore()
         build_database = DataStore()
 
-        for record in raw_records:
+        for record in raw_records["results"]:
             path = record["path"]
 
             date = to_datetime(record["created"])
@@ -356,9 +351,9 @@ def query_jfrog():
                 deploy_database.add_record(r)
 
 
-        return deploy_database, build_database
+        return (deploy_database, build_database)
 
-    except error:
+    except Exception as error:
         raise RuntimeError("unable to access the JFrog uenv API.")
 
 def to_datetime(string):
