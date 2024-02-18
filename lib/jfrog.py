@@ -72,4 +72,10 @@ def query() -> tuple:
     except Exception as error:
         raise RuntimeError("unable to access the JFrog uenv API.")
 
+def relative_from_record(record):
+    return f"{record.system}/{record.uarch}/{record.name}/{record.version}:{record.tag}"
 
+def address(record: Record, namespace: str):
+    if namespace!='deploy' and namespace!='build':
+        raise RuntimeError("namespace must be one of build or deploy")
+    return f"jfrog.svc.cscs.ch/uenv/{namespace}/{relative_from_record(record)}"

@@ -1,7 +1,9 @@
 #!/usr/bin/env python
 import argparse
+import copy
 import os
 import pathlib
+import re
 import sys
 
 prefix = pathlib.Path(__file__).parent.resolve()
@@ -45,9 +47,14 @@ def make_argparser():
     list_parser.add_argument("uenv", nargs="?", default=None, type=str)
 
     create_parser = subparsers.add_parser("create",
-                              help="create a local file system repository")
+                    help="create a local file system repository")
     create_parser.add_argument("--exists-ok", action="store_true", required=False,
-                               help="no error if the local registry exists")
+                    help="no error if the local registry exists")
+
+    deploy_parser = subparsers.add_parser("deploy",
+                    help="deploy a uenv to the 'deploy' namespace, visible to all users")
+    deploy_parser.add_argument("-t", "--tag", required=False, default="latest", type=str)
+    deploy_parser.add_argument("source", nargs="?", default=None, type=str)
 
     return parser
 
@@ -83,13 +90,11 @@ def get_filter(args):
 def relative_path_from_record(record):
     return f"{record.sha256}"
 
-def relative_jfrog_from_record(record):
-    return f"{record.system}/{record.uarch}/{record.name}/{record.version}:{record.tag}"
 
 # pretty print a list of Record
 def print_records(records):
     if len(records)>0:
-        print(terminal.colorize(f"{'uenv/version:tag':40}{'uarch':6}{'date':10} {'sha256':16} {'size':<10}", "yellow"))
+        print(terminal.colorize(f"{'uenv/version:tag':40}{'uarch':6}{'date':10} {'sha256':64} {'size':<10}", "yellow"))
         for r in records:
             namestr = f"{r.name}/{r.version}"
             tagstr = f"{r.tag}"
@@ -104,7 +109,7 @@ def print_records(records):
                 size_str = f"{(S/(1024*1024)):<.0f} MB"
             else:
                 size_str = f"{(S/(1024*1024*1024)):<.1f} GB"
-            print(f"{label:<40}{r.uarch:6}{datestr:10} {r.sha256[:16]:16} {size_str:<10}")
+            print(f"{label:<40}{r.uarch:6}{datestr:10} {r.sha256:64} {size_str:<10}")
 
 # return dictionary {"name", "version", "tag"} from a uenv description string
 #       "prgenv_gnu"              -> ("prgenv_gnu", None, None)
@@ -151,6 +156,10 @@ def uenv_record_path(record):
         return store + "/images/" + relative_path_from_record(record)
     return store
 
+def is_valid_sha256(s: str):
+    pattern = re.compile(r'^[a-fA-F-0-9]{64}$')
+    return True if pattern.match(s) else False
+
 if __name__ == "__main__":
 
     parser = make_argparser()
@@ -170,6 +179,7 @@ if __name__ == "__main__":
             deploy, build = jfrog.query()
         except RuntimeError as err:
             terminal.error(f"{str(err)}")
+
         terminal.info(f"downloaded jfrog meta data: build->{len(build.images)} images, deploy->{len(deploy.images)}")
 
         remote_database = build if args.build else deploy
@@ -201,11 +211,10 @@ if __name__ == "__main__":
                         "more than one uarch matches the the requested uenv. "
                         "Specify the desired uarch with the --uarch flag")
 
-            base = f"jfrog.svc.cscs.ch/uenv/{'build' if args.build else 'deploy'}"
             t = records[0]
-            jfrog_address = f"{base}/{relative_jfrog_from_record(t)}"
+            source_address = jfrog.address(t, 'build' if args.build else 'deploy')
 
-            terminal.info(f"pulling {t} from {jfrog_address} {t.size/(1024*1024):.0f} MB")
+            terminal.info(f"pulling {t} from {source_address} {t.size/(1024*1024):.0f} MB")
 
             repo_path = uenv_repo_path(args.repo)
             terminal.info(f"repo path: {repo_path}")
@@ -219,7 +228,7 @@ if __name__ == "__main__":
                 if cache.get_record(t.sha256) is None:
                     terminal.info(f"downloading {t.sha256}")
                     # download the image using oras
-                    oras.run_command(["pull", "-o", image_path, jfrog_address])
+                    oras.run_command(["pull", "-o", image_path, source_address])
                     # add the record to the cache
                     terminal.info(f"updating file system cache")
                     cache.add_record(t)
@@ -246,7 +255,7 @@ if __name__ == "__main__":
 
         sys.exit(0)
 
-    if args.command == "create":
+    elif args.command == "create":
         repo_path = uenv_repo_path(args.repo)
         terminal.info(f"repo path: {repo_path}")
 
@@ -254,6 +263,51 @@ if __name__ == "__main__":
             datastore.FileSystemCache.create(repo_path, exists_ok=args.exists_ok)
         except Exception as err:
             terminal.error(f"unable to find or initialise the local registry: {str(err)}")
+
+        sys.exit(0)
+
+    elif args.command == "deploy":
+        tags = [ tag.strip() for tag in args.tag.split(',') ]
+        source = args.source
+        terminal.info(f"deploying {source} with {tags}")
+
+        try:
+            _, build_database = jfrog.query()
+        except RuntimeError as err:
+            terminal.error(f"{str(err)}")
+        terminal.info(f"downloaded jfrog build meta data: {len(build_database.images)} images")
+
+        # after this block, record is the record of the requested source
+        if is_valid_sha256(source):
+            # lookup using sha256
+            source_record = build_database.get_record(source)
+            if record is None:
+                terminal.error(f"no record in the build repository matches the hash {source}")
+        else:
+            img_filter = {}
+            for key, value in parse_uenv_string(source).items():
+                if value is not None:
+                    img_filter[key] = value
+                else:
+                    terminal.error(f"source {source} must have full name/version:tag format")
+
+            # expect that src has [name, version, tag] keys
+            records = build_database.find_records(**img_filter)
+            
+            if not (len(records)==1):
+                terminal.error(f"source {source} is not an image in the build repository")
+            source_record = records[0]
+
+        target_record = copy.deepcopy(source_record)
+        target_record.tag = ','.join(tags)
+
+        terminal.info(f"source: {source_record}")
+        source_address = jfrog.address(source_record, 'build')
+        target_address = jfrog.address(target_record, 'deploy')
+        terminal.info(f"source address: {source_address}")
+        terminal.info(f"target address: {target_address}")
+
+        oras.run_command(["cp", "--concurrency", "10", "--recursive", source_address, target_address])
 
         sys.exit(0)
 

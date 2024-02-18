@@ -52,7 +52,7 @@ class Record:
         return False
 
     def __str__(self):
-        return f"{self.name}/{self.version}:{self.tag} @ {self.system}:{self.uarch}"
+        return f"{self.system}/{self.uarch}/{self.name}/{self.version}:{self.tag}/{self.sha256}"
 
     def __repr__(self):
         return f"Record({self.system}, {self.uarch}, {self.name}, {self.version}, {self.tag})"
@@ -80,6 +80,11 @@ class Record:
     @property
     def tag(self):
         return self._tag
+
+
+    @tag.setter
+    def tag(self, newtag):
+        self._tag = newtag
 
     @property
     def sha256(self):
