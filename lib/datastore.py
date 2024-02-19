@@ -1,25 +1,38 @@
+import json
+import re
 import os
 
-import json
 from record import Record
 import terminal
 
 UENV_CLI_API_VERSION=1
 
+def is_sha256(s: str):
+    pattern = re.compile(r'^[a-fA-F-0-9]{64}$')
+    return True if pattern.match(s) else False
+
+def is_short_sha256(s: str):
+    pattern = re.compile(r'^[a-fA-F-0-9]{16}$')
+    return True if pattern.match(s) else False
+
 class DataStore:
     def __init__(self):
         # all images store with (key,value) = (sha256,Record)
         self._images = {}
+        self._short_sha = {}
 
         self._store = {"system": {}, "uarch": {}, "name": {}, "version": {}, "tag": {}}
 
-    def add_record(self, r: Record, overwrite: bool = False):
-        # test for collisions
-        if (not overwrite) and (self._images.get(r.sha256, None) is not None):
-            raise ValueError(f"an image with the hash {r.sha256} already exists")
-
+    def add_record(self, r: Record):
         sha = r.sha256
-        self._images[sha] = r
+        short_sha = r.sha256[:16]
+        self._images.setdefault(sha, []).append(r)
+        # check for (exceedingly unlikely) collision
+        if short_sha in self._short_sha:
+            old_sha = self._short_sha[short_sha]
+            if sha != old_sha:
+                terminal.error('image hash collision:\n  {sha}\n  {old_sha}')
+        self._short_sha[sha[:16]] = sha
         self._store["system"] .setdefault(r.system, []).append(sha)
         self._store["uarch"]  .setdefault(r.uarch, []).append(sha)
         self._store["name"]   .setdefault(r.name, []).append(sha)
@@ -53,8 +66,12 @@ class DataStore:
     def images(self):
         return self._images
 
-    def get_record(self, sha256: str) -> Record:
-        return self._images.get(sha256, None)
+    def get_record(self, sha: str) -> Record:
+        if is_sha256(sha):
+            return self._images.get(sha, None)
+        elif is_short_sha256(sha):
+            return self._images.get(self._short_sha[sha], None)
+        raise ValueError(f"{sha} is not a valid sha256 or short (16 character) sha")
 
     # Convert to a dictionary that can be written to file as JSON
     # The serialisation and deserialisation are central: able to represent

@@ -70,7 +70,7 @@ def query() -> tuple:
         return (deploy_database, build_database)
 
     except Exception as error:
-        raise RuntimeError("unable to access the JFrog uenv API.")
+        raise RuntimeError(f"downloading image data from jfrog.svs.cscs.ch ({str(error)})")
 
 def relative_from_record(record):
     return f"{record.system}/{record.uarch}/{record.name}/{record.version}:{record.tag}"
