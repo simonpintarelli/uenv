@@ -7,7 +7,7 @@ import terminal
 
 UENV_CLI_API_VERSION=1
 
-def is_sha256(s: str):
+def is_full_sha256(s: str):
     pattern = re.compile(r'^[a-fA-F-0-9]{64}$')
     return True if pattern.match(s) else False
 
@@ -15,7 +15,16 @@ def is_short_sha256(s: str):
     pattern = re.compile(r'^[a-fA-F-0-9]{16}$')
     return True if pattern.match(s) else False
 
+
 class DataStore:
+    @staticmethod
+    def is_valid_sha(sha:str) -> bool:
+        if is_full_sha256(sha):
+            return True
+        if is_short_sha256(sha):
+            return True
+        return False
+
     def __init__(self):
         # all images store with (key,value) = (sha256,Record)
         self._images = {}
@@ -58,7 +67,10 @@ class DataStore:
         else:
             unique = set()
 
-        results = [self._images[sha] for sha in unique]
+        results = []
+        for sha in unique:
+            results += (self._images[sha])
+        #results = [self._images[sha] for sha in unique]
         results.sort(reverse=True)
         return results
 
@@ -66,20 +78,25 @@ class DataStore:
     def images(self):
         return self._images
 
+    # return a list of records that match a sha
     def get_record(self, sha: str) -> Record:
-        if is_sha256(sha):
-            return self._images.get(sha, None)
+        if is_full_sha256(sha):
+            return self._images.get(sha, [])
         elif is_short_sha256(sha):
-            return self._images.get(self._short_sha[sha], None)
+            return self._images.get(self._short_sha[sha], [])
         raise ValueError(f"{sha} is not a valid sha256 or short (16 character) sha")
 
     # Convert to a dictionary that can be written to file as JSON
     # The serialisation and deserialisation are central: able to represent
     # uenv that are available in both JFrog and filesystem directory tree.
     def serialise(self, version: int=UENV_CLI_API_VERSION):
+        image_list = []
+        for x in self._images.values():
+            image_list += x
+        terminal.info(f"serialized image list in datastore: {image_list}")
         return {
                 "API_VERSION": version,
-                "images": [img.dictionary for img in self._images.values()]
+                "images": [img.dictionary for img in image_list]
         }
 
     # Convert to a dictionary that can be written to file as JSON
@@ -137,6 +154,8 @@ class FileSystemCache():
     # Return the full record for a given hash
     # Returns None if no image with that hash is stored in the repo.
     def get_record(self, sha256: str):
+        if not DataStore.is_valid_sha(sha256):
+            raise ValueError(f"{sha256} is not a valid image sha256 (neither full 64 or short 16 character form)")
         return self._database.get_record(sha256)
 
     def publish(self):

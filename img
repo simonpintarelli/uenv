@@ -95,22 +95,21 @@ def relative_path_from_record(record):
 def print_records(records):
     if len(records)>0:
         print(terminal.colorize(f"{'uenv/version:tag':40}{'uarch':6}{'date':10} {'sha256':16} {'size':<10}", "yellow"))
-        for rset in records:
-            for r in rset:
-                namestr = f"{r.name}/{r.version}"
-                tagstr = f"{r.tag}"
-                label = namestr + ":" + tagstr
-                datestr = r.date.strftime("%Y-%m-%d")
-                S = r.size
-                if S<1024:
-                    size_str = f"{S:<} bytes"
-                elif S<1024*1024:
-                    size_str = f"{(S/1024):<.0f} kB"
-                elif S<1024*1024*1024:
-                    size_str = f"{(S/(1024*1024)):<.0f} MB"
-                else:
-                    size_str = f"{(S/(1024*1024*1024)):<.1f} GB"
-                print(f"{label:<40}{r.uarch:6}{datestr:10} {r.sha256[:16]:16} {size_str:<10}")
+        for r in records:
+            namestr = f"{r.name}/{r.version}"
+            tagstr = f"{r.tag}"
+            label = namestr + ":" + tagstr
+            datestr = r.date.strftime("%Y-%m-%d")
+            S = r.size
+            if S<1024:
+                size_str = f"{S:<} bytes"
+            elif S<1024*1024:
+                size_str = f"{(S/1024):<.0f} kB"
+            elif S<1024*1024*1024:
+                size_str = f"{(S/(1024*1024)):<.0f} MB"
+            else:
+                size_str = f"{(S/(1024*1024*1024)):<.1f} GB"
+            print(f"{label:<40}{r.uarch:6}{datestr:10} {r.sha256[:16]:16} {size_str:<10}")
 
 # return dictionary {"name", "version", "tag"} from a uenv description string
 #       "prgenv_gnu"              -> ("prgenv_gnu", None, None)
@@ -169,6 +168,7 @@ if __name__ == "__main__":
 
     parser = make_argparser()
     args = parser.parse_args()
+    terminal.use_colored_output(args.no_color)
     if args.command is None:
         parser.print_help()
         sys.exit(0)
@@ -185,11 +185,13 @@ if __name__ == "__main__":
         except RuntimeError as err:
             terminal.error(f"{str(err)}")
 
-        terminal.info(f"downloaded jfrog meta data: build->{len(build.images)} images, deploy->{len(deploy.images)}")
+        terminal.info(f"downloaded jfrog meta data: build->{len(build.images)}, deploy->{len(deploy.images)}")
 
         remote_database = build if args.build else deploy
 
         records = remote_database.find_records(**img_filter)
+
+        terminal.info(f"The following records matched the query: {records}")
 
         if args.command == "find":
             if len(records)>0:
@@ -230,7 +232,7 @@ if __name__ == "__main__":
                 image_path = cache.image_path(t)
 
                 # if the record isn't already in the filesystem repo download it
-                if cache.get_record(t.sha256) is None:
+                if not cache.get_record(t.sha256):
                     terminal.info(f"downloading {t.sha256}")
                     # download the image using oras
                     oras.run_command(["pull", "-o", image_path, source_address])
@@ -283,11 +285,11 @@ if __name__ == "__main__":
         terminal.info(f"downloaded jfrog build meta data: {len(build_database.images)} images")
 
         # after this block, record is the record of the requested source
-        if is_valid_sha256(source) or is_short_sha256(source):
+        if DataStore.is_valid_sha(source):
             # lookup using sha256
             source_record = build_database.get_record(source)
             terminal.info(f"image to deploy: {source_record}")
-            if source_record is None:
+            if not source_record:
                 terminal.error(f"no record in the build repository matches the hash {source}")
             source_record = source_record[0]
         else:

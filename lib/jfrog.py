@@ -1,16 +1,9 @@
-from datetime import datetime, timezone
 import requests
 
 from datastore import DataStore
 from record import Record
 import terminal
 
-
-def to_datetime(date: str):
-    # In Python 3.6, datetime.fromisoformat is not available.
-    # Manually parsing the string.
-    dt_format = '%Y-%m-%dT%H:%M:%S.%fZ'
-    return datetime.strptime(date, dt_format).replace(tzinfo=timezone.utc)
 
 # The https://cicd-ext-mw.cscs.ch/uenv/list API endpoint returns
 # a list of images in the jfrog uenv.
@@ -57,7 +50,7 @@ def query() -> tuple:
         for record in raw_records["results"]:
             path = record["path"]
 
-            date = to_datetime(record["created"])
+            date = Record.to_datetime(record["created"])
             sha256 = record["sha256"]
             size = record["size"]
             if path.startswith("build/"):

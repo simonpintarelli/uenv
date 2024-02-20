@@ -1,4 +1,13 @@
+from datetime import datetime, timezone
+
 class Record:
+    @staticmethod
+    def to_datetime(date: str):
+        # In Python 3.6, datetime.fromisoformat is not available.
+        # Manually parsing the string.
+        dt_format = '%Y-%m-%dT%H:%M:%S.%fZ'
+        return datetime.strptime(date, dt_format).replace(tzinfo=timezone.utc)
+
 
     def __init__(self, system: str, uarch: str, name: str, version: str, tag: str, date: str, size_bytes: int, sha256: str):
         self._system  = system
@@ -27,7 +36,7 @@ class Record:
         name = raw["name"]
         version = raw["version"]
         tag = raw["tag"]
-        date = to_datetime(raw["date"])
+        date = Record.to_datetime(raw["date"])
         size_bytes = raw["size"]
         sha256 = raw["sha256"]
 
@@ -47,6 +56,8 @@ class Record:
         if other.name   < self.name: return False
         if self.version < other.version: return True
         if other.version< self.version: return False
+        if self.tag=="latest"  and other.tag!="latest": return False
+        if other.tag=="latest" and self.tag!="latest":  return True
         if self.tag     < other.tag: return True
         #if other.tag    < self.tag: return False
         return False
