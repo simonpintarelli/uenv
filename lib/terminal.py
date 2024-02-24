@@ -41,7 +41,7 @@ def colorize(string, color):
     else:
         return string
 
-def deubg_level(level: int):
+def set_debug_level(level: int):
     global debug_level
     debug_level = level
 

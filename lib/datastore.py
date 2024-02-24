@@ -53,13 +53,20 @@ class DataStore:
             raise ValueError("At least one constraint must be provided")
 
         for field in constraints:
-            if field not in self._store:
-                raise ValueError(f"Invalid field: {field}. Must be one of 'system', 'uarch', 'name', 'version', 'tag'")
+            if (field != "sha") and (field not in self._store):
+                raise ValueError(f"Invalid field: {field}. Must be one of 'system', 'uarch', 'name', 'version', 'tag', 'sha'")
 
-        # Find matching records for each constraint
-        matching_records_sets = [
-            set(self._store[field].get(value, [])) for field, value in constraints.items()
-        ]
+        if "sha" in constraints:
+            sha = constraints["sha"]
+            if len(sha)<64:
+                matching_records_sets = [set([self._short_sha[sha]])]
+            else:
+                matching_records_sets = [set([sha])]
+        else:
+            # Find matching records for each constraint
+            matching_records_sets = [
+                set(self._store[field].get(value, [])) for field, value in constraints.items()
+            ]
 
         # Intersect all sets of matching records
         if matching_records_sets:
@@ -70,7 +77,6 @@ class DataStore:
         results = []
         for sha in unique:
             results += (self._images[sha])
-        #results = [self._images[sha] for sha in unique]
         results.sort(reverse=True)
         return results
 

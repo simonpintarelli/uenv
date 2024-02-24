@@ -21,6 +21,9 @@ def make_argparser():
     parser.add_argument("--no-color",
             action="store_true",
             help="disable color output")
+    parser.add_argument("-v", "--verbose",
+            action="store_true",
+            help="enable verbose output")
     parser.add_argument("-r", "--repo",
             required=False, default=None, type=str,
             help="the local repository")
@@ -74,16 +77,24 @@ def get_options(args):
     return options
 
 def get_filter(args):
+    # TODO: test "name" to see whether it is a sha/sha256
     options = get_options(args)
     img_filter = {"system": options["system"]}
 
-    for key, value in parse_uenv_string(options["name"]).items():
-        if value is not None:
-            img_filter[key] = value
+    name = options["name"]
+    if (name is not None) and datastore.DataStore.is_valid_sha(name):
+        terminal.info(f"get_filter: search term {name} is being treated as a sha256")
+        img_filter["sha"] = name
+    else:
+        terminal.info(f"get_filter: search term {name} is being treated as a name")
+        for key, value in parse_uenv_string(options["name"]).items():
+            if value is not None:
+                img_filter[key] = value
 
     if options["uarch"] is not None:
         img_filter["uarch"] = options["uarch"]
 
+    terminal.info(f"get_filter: filter {img_filter}")
     return img_filter
 
 
@@ -145,39 +156,23 @@ def uenv_repo_path(path: str=None) -> str:
 
     terminal.error("No repository path available: set UENV_REPO_PATH or use the --repo flag")
 
-# return the relative path of an image
-def record_path(record):
-    return f"{record.system}/{record.uarch}/{record.name}/{record.version}/{record.tag}"
-
-# the path of the image corresponding to a specific image in the user cache
-def uenv_record_path(record):
-    store = uenv_image_path()
-    if store:
-        return store + "/images/" + relative_path_from_record(record)
-    return store
-
-def is_valid_sha256(s: str):
-    pattern = re.compile(r'^[a-fA-F-0-9]{64}$')
-    return True if pattern.match(s) else False
-
-def is_short_sha256(s: str):
-    pattern = re.compile(r'^[a-fA-F-0-9]{16}$')
-    return True if pattern.match(s) else False
-
 if __name__ == "__main__":
 
     parser = make_argparser()
     args = parser.parse_args()
-    terminal.use_colored_output(args.no_color)
+
     if args.command is None:
         parser.print_help()
         sys.exit(0)
+
+    terminal.use_colored_output(args.no_color)
+    if args.verbose:
+        terminal.set_debug_level(2)
 
     terminal.info(f"command mode: {args.command}")
 
     if args.command in ["find", "pull"]:
         img_filter = get_filter(args)
-        terminal.info(f"filter for remote repo {img_filter}")
         terminal.info(f"using {'build' if args.build else 'deploy'} remote repo")
 
         try:
