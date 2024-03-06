@@ -15,9 +15,18 @@ import jfrog
 import oras
 import datastore
 import terminal
+import textwrap
 
 def make_argparser():
-    parser = argparse.ArgumentParser(description=("Interact with the uenv artifactory"))
+    parser = argparse.ArgumentParser(
+            formatter_class=argparse.RawDescriptionHelpFormatter,
+            description=textwrap.dedent(
+                """\
+Interact with uenv.
+
+uenv provides ...
+                """
+                ))
     parser.add_argument("--no-color",
             action="store_true",
             help="disable color output")
@@ -30,7 +39,37 @@ def make_argparser():
 
     subparsers = parser.add_subparsers(dest="command")
 
-    find_parser = subparsers.add_parser("find", help="find uenv in the CSCS registry")
+    find_parser = subparsers.add_parser("find",
+            formatter_class=argparse.RawDescriptionHelpFormatter,
+            epilog="""\
+Find uenv in the CSCS registry. Uenv can be downloaded from the registry using
+the pull command, and list the downloaded uenv with the list command. For more
+information:
+  img pull --help
+  img list --help
+
+Example - find all uenv available (deployed) on this cluster:
+  img find
+
+Example - find all uenv with the name prgenv-gnu on this cluster:
+  img find prgenv-gnu
+
+Example - find all uenv with name prgenv-gnu and version 24.2 on this cluster:
+  img find prgenv-gnu/24.2
+
+Example - find the uenv with name prgenv-gnu, version 24.2 and tag "latest" on this cluster:
+  img find prgenv-gnu/24.2:latest
+
+Example - find all uenv with the name prgenv-gnu for uarch target zen3 on this cluster:
+  img find prgenv-gnu --uarch=a100
+
+Example - find all uenv that have a concrete sha245 checksum on this cluster:
+  img find 3313739553fe6553f789a35325eb6954a37a7b85cdeab943d0878a05edaac998
+  img find 3313739553fe6553     # the first 16 characters can be used
+
+Example - find all uenv that have been generated as build artifacts on this cluster:
+  img find --build
+""")
     find_parser.add_argument("-s", "--system", required=False, type=str)
     find_parser.add_argument("-a", "--uarch", required=False, type=str)
     find_parser.add_argument("--build", action="store_true",
@@ -85,11 +124,13 @@ def get_filter(args):
     if (name is not None) and datastore.DataStore.is_valid_sha(name):
         terminal.info(f"get_filter: search term {name} is being treated as a sha256")
         img_filter["sha"] = name
-    else:
+    elif name is not None:
         terminal.info(f"get_filter: search term {name} is being treated as a name")
         for key, value in parse_uenv_string(options["name"]).items():
             if value is not None:
                 img_filter[key] = value
+    else:
+        terminal.info(f"get_filter: no search term provided")
 
     if options["uarch"] is not None:
         img_filter["uarch"] = options["uarch"]
@@ -269,9 +310,8 @@ if __name__ == "__main__":
         sys.exit(0)
 
     elif args.command == "deploy":
-        tags = [ tag.strip() for tag in args.tag.split(',') ]
         source = args.source
-        terminal.info(f"deploying {source} with {tags}")
+        terminal.info(f"trying to deploy {args.source} with tags {args.tag}")
 
         try:
             _, build_database = jfrog.query()
@@ -279,11 +319,11 @@ if __name__ == "__main__":
             terminal.error(f"{str(err)}")
         terminal.info(f"downloaded jfrog build meta data: {len(build_database.images)} images")
 
-        # after this block, record is the record of the requested source
-        if DataStore.is_valid_sha(source):
+        # after this block, source_record is the record of the requested source
+        if datastore.DataStore.is_valid_sha(source):
             # lookup using sha256
             source_record = build_database.get_record(source)
-            terminal.info(f"image to deploy: {source_record}")
+            terminal.info(f"searched for {source} in the build repo, found: {source_record}")
             if not source_record:
                 terminal.error(f"no record in the build repository matches the hash {source}")
             source_record = source_record[0]
@@ -298,11 +338,18 @@ if __name__ == "__main__":
             # expect that src has [name, version, tag] keys
             records = build_database.find_records(**img_filter)
 
+            terminal.info(f"searched for {source} in the build repo, found: {records}")
+
             if not (len(records)==1):
                 terminal.error(f"source {source} is not an image in the build repository")
-            source_record = records[0][0]
+            source_record = records[0]
+
+        terminal.info(f"the source is {source_record}")
 
         target_record = copy.deepcopy(source_record)
+
+        # create comma separated list of tags to be attached to the deployed image
+        tags = [ tag.strip() for tag in args.tag.split(',') ]
         target_record.tag = ','.join(tags)
 
         terminal.info(f"source: {source_record}")
@@ -311,7 +358,9 @@ if __name__ == "__main__":
         terminal.info(f"source address: {source_address}")
         terminal.info(f"target address: {target_address}")
 
-        oras.run_command(["cp", "--concurrency", "10", "--recursive", source_address, target_address])
+        #oras.run_command(["cp", "--concurrency", "10", "--recursive", source_address, target_address])
+
+        terminal.info(f"successfully deployed {target_address}")
 
         sys.exit(0)
 
