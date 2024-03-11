@@ -58,10 +58,13 @@ class DataStore:
 
         if "sha" in constraints:
             sha = constraints["sha"]
+            matching_records_sets = [set()]
             if len(sha)<64:
-                matching_records_sets = [set([self._short_sha[sha]])]
+                if sha in self._short_sha:
+                    matching_records_sets = [set([self._short_sha[sha]])]
             else:
-                matching_records_sets = [set([sha])]
+                if sha in self._images:
+                    matching_records_sets = [set([sha])]
         else:
             # Find matching records for each constraint
             matching_records_sets = [

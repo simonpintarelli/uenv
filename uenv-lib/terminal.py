@@ -8,19 +8,25 @@ debug_level = 1
 # - by default colored output is ON
 # - if the flag --no-color is passed it is OFF
 # - if the environment variable NO_COLOR is set it is OFF
-def use_colored_output(cli_arg):
+def use_colored_output(cli_arg: bool):
     global colored_output
 
     # The --no-color argument overrides all environment variables if passed.
     if cli_arg:
-        print(colorize("nope", "cyan"))
         colored_output = False
         return
 
     # Check the env. var NO_COLOR and disable color if set.
+    # See https://no-color.org/ for the informal spec
+    #
+    #    Command-line software which adds ANSI color to its output by default
+    #    should check for a NO_COLOR environment variable that, when present and
+    #    not an empty string (regardless of its value), prevents the addition of
+    #    ANSI color.
+    #
     if os.environ.get('NO_COLOR') is not None:
         color_var = os.environ.get('NO_COLOR')
-        if len(color_var)>0 and color_var != "0":
+        if len(color_var)>0:
             colored_output = False
             return
 
@@ -35,6 +41,7 @@ def colorize(string, color):
         "magenta": "35",
         "cyan":    "36",
         "white":   "37",
+        "gray":    "90",
     }
     if colored_output:
         return f"\033[1;{colors[color]}m{string}\033[0m"

@@ -133,10 +133,28 @@ $show cp "$script_path/uenv-impl" "$impl_path"
 $show sed "s|@@version@@|$version|g" -i "$impl_path"
 $show chmod 755 "$impl_path"
 
+# install the uenv image tool
+img_impl_path="$prefix/libexec/uenv-image"
+echo "installing $img_impl_path"
+$show cp "$script_path/uenv-image" "$img_impl_path"
+$show chmod 755 "$img_impl_path"
+
+lib_path="$prefix/libexec/uenv-lib"
+echo "installing $lib_path"
+$show install -v -m 755 -d "$lib_path"
+$show install -v -m 644 -D -t "$lib_path" uenv-lib/datastore.py
+$show install -v -m 644 -D -t "$lib_path" uenv-lib/flock.py
+$show install -v -m 644 -D -t "$lib_path" uenv-lib/jfrog.py
+$show install -v -m 644 -D -t "$lib_path" uenv-lib/oras.py
+$show install -v -m 644 -D -t "$lib_path" uenv-lib/record.py
+$show install -v -m 644 -D -t "$lib_path" uenv-lib/terminal.py
+$show cp "$script_path/uenv-image" "$img_impl_path"
+
 # Copy the initialisation script
 echo "installing $init_path"
 $show cp "$script_path/activate" "$init_path"
 $show sed "s|@@impl@@|$impl_path|g"  -i "$init_path"
+$show sed "s|@@image_impl@@|$img_impl_path|g"  -i "$init_path"
 $show sed "s|@@prefix@@|$prefix|g"   -i "$init_path"
 $show sed "s|@@version@@|$version|g" -i "$init_path"
 $show chmod 644 "$init_path"

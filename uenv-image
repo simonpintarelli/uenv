@@ -7,13 +7,16 @@ import re
 import sys
 
 prefix = pathlib.Path(__file__).parent.resolve()
-libpath = prefix / 'lib'
+libpath = prefix / 'uenv-lib'
 sys.path = [libpath.as_posix()] + sys.path
 
+from terminal import colorize
+
+import datastore
 import flock
 import jfrog
 import oras
-import datastore
+import record
 import terminal
 import textwrap
 
@@ -22,80 +25,226 @@ def make_argparser():
             formatter_class=argparse.RawDescriptionHelpFormatter,
             description=textwrap.dedent(
                 """\
-Interact with uenv.
+Your one-stop shop for using uenv.
 
-uenv provides ...
+For more information on how to use individual commands use the --help flag, e.g.:
+
+uenv image --help
+uenv pull --help
                 """
                 ))
     parser.add_argument("--no-color",
             action="store_true",
-            help="disable color output")
+            help="Disable color output. By default color output is enabled, unless the NO_COLOR environment variable is set.")
     parser.add_argument("-v", "--verbose",
             action="store_true",
-            help="enable verbose output")
+            help="Enable verbose output for debugging.")
     parser.add_argument("-r", "--repo",
             required=False, default=None, type=str,
-            help="the local repository")
+            help="The path on the local filesystem where uenv are managed. By default the environment variable UENV_REPO_PATH is used, if set, otherwise $SCRATCH/.uenv-images is used if the SCRATCH environment variable is set. This option will override these defaults, and must be set if neither of the defaults is set.")
 
     subparsers = parser.add_subparsers(dest="command")
 
-    find_parser = subparsers.add_parser("find",
+    path_parser = subparsers.add_parser("inspect",
             formatter_class=argparse.RawDescriptionHelpFormatter,
-            epilog="""\
-Find uenv in the CSCS registry. Uenv can be downloaded from the registry using
-the pull command, and list the downloaded uenv with the list command. For more
-information:
-  img pull --help
-  img list --help
+            help="Display detailed information about a uenv.",
+            epilog=f"""\
+Display detailed information about a uenv.
+It is an error if no uenv matching the requested spec is on the local filesystem.
 
-Example - find all uenv available (deployed) on this cluster:
-  img find
+{colorize("Example", "blue")} - get information about a uenv
+  {colorize("uenv image inspect prgenv-gnu/24.2:latest", "white")}
 
-Example - find all uenv with the name prgenv-gnu on this cluster:
-  img find prgenv-gnu
+{colorize("Example", "blue")} - it is also possible to get the path of the most relevant version/tag
+of a uenv, or use an explicit sha:
+  {colorize("uenv image inspect prgenv-gnu", "white")}
+  {colorize("uenv image inspect prgenv-gnu/24.2", "white")}
+  {colorize("uenv image inspect 3313739553fe6553f789a35325eb6954a37a7b85cdeab943d0878a05edaac998", "white")}
+  {colorize("uenv image inspect 3313739553fe6553     # the first 16 characters can be used", "white")}
 
-Example - find all uenv with name prgenv-gnu and version 24.2 on this cluster:
-  img find prgenv-gnu/24.2
+{colorize("Example", "blue")} - print the path of a uenv
+  {colorize("uenv image inspect --format '{path}' prgenv-gnu", "white")}
 
-Example - find the uenv with name prgenv-gnu, version 24.2 and tag "latest" on this cluster:
-  img find prgenv-gnu/24.2:latest
+{colorize("Example", "blue")} - print the name and tag of a uenv un the name:tag format
+  {colorize("uenv image inspect --format '{name}:{tag}' prgenv-gnu", "white")}
 
-Example - find all uenv with the name prgenv-gnu for uarch target zen3 on this cluster:
-  img find prgenv-gnu --uarch=a100
+{colorize("Example", "blue")} - print the location of the squashfs file of an image
+  {colorize("uenv image inspect --format '{sqfs}' prgenv-gnu", "white")}
 
-Example - find all uenv that have a concrete sha245 checksum on this cluster:
-  img find 3313739553fe6553f789a35325eb6954a37a7b85cdeab943d0878a05edaac998
-  img find 3313739553fe6553     # the first 16 characters can be used
+Including name, tag and sqfs, the following variables can be printed in a
+format string passed to the --format option:
+    name:    name
+    version: version
+    tag:     tag
+    system:  the system that the uenv was built for
+    uarch:   the micro-architecture that the uenv was built for
+    sha256:  the unique sha256 hash of the uenv
+    date:    date that the uenv was created
+    path:    absolute path where the uenv is stored
+    sqfs:    absolute path of the squashfs file\
+""")
+    path_parser.add_argument("-s", "--system", required=False, type=str)
+    path_parser.add_argument("-a", "--uarch", required=False, type=str)
+    path_parser.add_argument("--format", type=str,
+                             default=
+f"""\
+name:    {{name}}
+version: {{version}}
+tag:     {{tag}}
+system:  {{system}}
+uarch:   {{uarch}}
+sha256:  {{sha256}}
+date:    {{date}}
+path:    {{path}}
+sqfs:    {{sqfs}}\
+""" ,
+                             help="optional format string")
+    path_parser.add_argument("uenv", type=str)
 
-Example - find all uenv that have been generated as build artifacts on this cluster:
-  img find --build
+    find_parser = subparsers.add_parser("find",
+            help="Find uenv in the CSCS registry.",
+            formatter_class=argparse.RawDescriptionHelpFormatter,
+            epilog=f"""\
+Find uenv in the CSCS registry.
+
+Uenv can be downloaded from the registry using the pull command, and list the
+downloaded uenv with the list command. For more information:
+  {colorize("uenv image pull --help", "white")}
+  {colorize("uenv image ls --help", "white")}
+
+{colorize("Example", "blue")} - find all uenv available (deployed) on this cluster:
+  {colorize("uenv image find", "white")}
+
+{colorize("Example", "blue")} - find all uenv with the name prgenv-gnu on this cluster:
+  {colorize("uenv image find prgenv-gnu", "white")}
+
+{colorize("Example", "blue")} - find all uenv with name prgenv-gnu and version 24.2 on this cluster:
+  {colorize("uenv image find prgenv-gnu/24.2", "white")}
+
+{colorize("Example", "blue")} - find the uenv with name prgenv-gnu, version 24.2 and tag "latest" on this cluster:
+  {colorize("uenv image find prgenv-gnu/24.2:latest", "white")}
+
+{colorize("Example", "blue")} - find all uenv with the name prgenv-gnu for uarch target gh200 on this cluster:
+  {colorize("uenv image find prgenv-gnu --uarch=gh200", "white")}
+
+{colorize("Example", "blue")} - find all uenv that have a concrete sha245 checksum on this cluster:
+  {colorize("uenv image find 3313739553fe6553f789a35325eb6954a37a7b85cdeab943d0878a05edaac998", "white")}
+  {colorize("uenv image find 3313739553fe6553     # the first 16 characters can be used", "white")}
+
+{colorize("Example", "blue")} - find all uenv that have been generated as build artifacts on this cluster:
+  {colorize("uenv image find --build", "white")}
 """)
     find_parser.add_argument("-s", "--system", required=False, type=str)
     find_parser.add_argument("-a", "--uarch", required=False, type=str)
     find_parser.add_argument("--build", action="store_true",
-                             help="enable undeployed builds", required=False)
+                             help="Search undeployed builds.", required=False)
     find_parser.add_argument("uenv", nargs="?", default=None, type=str)
 
-    pull_parser = subparsers.add_parser("pull", help="pull a uenv from the CSCS registry")
+    pull_parser = subparsers.add_parser("pull",
+            help="Pull a uenv from the CSCS registry.",
+            formatter_class=argparse.RawDescriptionHelpFormatter,
+            epilog=f"""\
+Pull a uenv from the CSCS registry.
+
+{colorize("Example", "blue")} - pull the most recent version of uenv with the name prgenv-gnu on this cluster:
+  {colorize("uenv image pull prgenv-gnu", "white")}
+
+{colorize("Example", "blue")} - pull the most recent tag of uenv with the name prgenv-gnu/24.2 on this cluster:
+  {colorize("uenv image pull prgenv-gnu/24.2", "white")}
+
+{colorize("Example", "blue")} - pull a specific version and tag of prgenv-gnu:
+  {colorize("uenv image pull prgenv-gnu/24.2:latest", "white")}
+
+{colorize("Example", "blue")} - pull using the unique sha256 of an uenv.
+  {colorize("uenv image pull 3313739553fe6553f789a35325eb6954a37a7b85cdeab943d0878a05edaac998", "white")}
+  {colorize("uenv image pull 3313739553fe6553     # the first 16 characters can be used", "white")}
+
+{colorize("Example", "blue")} - pull the uenv with the name prgenv-gnu for uarch target gh200 on this cluster:
+Note that this is only neccesary when a vCluster has nodes with more than one uarch, and
+versions of the same uenv compiled against different uarch has been deployed.
+  {colorize("uenv image pull prgenv-gnu --uarch=gh200", "white")}
+
+{colorize("Example", "blue")} - pull a uenv from the build repository.
+By default only deployed images are pulled, and this option is only available to users
+with appropriate JFrog access and with the JFrog token in their oras keychain.
+  {colorize("uenv image pull 3313739553fe6553 --build", "white")}
+""")
     pull_parser.add_argument("-s", "--system", required=False, type=str)
     pull_parser.add_argument("-a", "--uarch", required=False, type=str)
     pull_parser.add_argument("--build", action="store_true", required=False,
                              help="enable undeployed builds")
     pull_parser.add_argument("uenv", nargs="?", default=None, type=str)
 
-    list_parser = subparsers.add_parser("list", help="list cached images")
+    list_parser = subparsers.add_parser("ls",
+            help="List available uenv.",
+            formatter_class=argparse.RawDescriptionHelpFormatter,
+            epilog=f"""\
+List uenv that are available.
+
+
+
+{colorize("Example", "blue")} - list all uenv:
+  {colorize("uenv image ls", "white")}
+
+{colorize("Example", "blue")} - list all uenv with the name prgenv-gnu:
+  {colorize("uenv image ls prgenv-gnu", "white")}
+
+{colorize("Example", "blue")} - list all uenv with name prgenv-gnu and version 24.2:
+  {colorize("uenv image ls prgenv-gnu/24.2", "white")}
+
+{colorize("Example", "blue")} - list the uenv with name prgenv-gnu, version 24.2 and tag "latest":
+  {colorize("uenv image ls prgenv-gnu/24.2:latest", "white")}
+
+{colorize("Example", "blue")} - list all uenv with the name prgenv-gnu for uarch target gh200:
+  {colorize("uenv image ls prgenv-gnu --uarch=gh200", "white")}
+
+{colorize("Example", "blue")} - list all uenv that have a concrete sha245 checksum:
+  {colorize("uenv image ls 3313739553fe6553f789a35325eb6954a37a7b85cdeab943d0878a05edaac998", "white")}
+  {colorize("uenv image ls 3313739553fe6553", "white")} # the first 16 characters can be used
+""")
     list_parser.add_argument("-s", "--system", required=False, type=str)
     list_parser.add_argument("-a", "--uarch", required=False, type=str)
     list_parser.add_argument("uenv", nargs="?", default=None, type=str)
 
     create_parser = subparsers.add_parser("create",
-                    help="create a local file system repository")
+                    help="Create a local file system repository.")
     create_parser.add_argument("--exists-ok", action="store_true", required=False,
-                    help="no error if the local registry exists")
+                    help="No error if the local registry exists.")
 
     deploy_parser = subparsers.add_parser("deploy",
-                    help="deploy a uenv to the 'deploy' namespace, visible to all users")
-    deploy_parser.add_argument("-t", "--tag", required=False, default="latest", type=str)
+                help="Deploy a uenv to the 'deploy' namespace, accessible to all users.",
+                formatter_class=argparse.RawDescriptionHelpFormatter,
+                epilog=
+f"""\
+Deploy a uenv from the build repo to the deploy repo, where all users can access it.
+
+{colorize("Attention", "red")}: this operation can only be performed by CSCS staff with appropriate
+access rights and a JFrog token configured for oras.
+
+{colorize("Attention", "red")}: deployment a new version of a uenv with the :latest tag will modify the version that is
+provided by default to all users on the system.
+
+The recommended method for deploying images is to first find the sha256 of the image
+in the build namespace that you wish to deploy
+
+{colorize("uenv image find --build icon-wcp", "white")}
+{colorize("uenv/version:tag                        uarch date       sha256           size", "gray")}
+{colorize("icon-wcp/v1:1208323951                  gh200 2024-03-11 e901b85c7652802e 7.8 GB", "gray")}
+{colorize("icon-wcp/v1:1206570249                  gh200 2024-03-08 0cb8e7e23b4fdb5c 7.8 GB", "gray")}
+
+In this example, we choose the most recent build with sha256 e901b85c7652802e
+
+{colorize("uenv image deploy e901b85c7652802e --tags=latest,v1", "white")}
+
+Then check that it has been deployed:
+
+{colorize("uenv image find e901b85c7652802e", "white")}
+{colorize("uenv/version:tag                        uarch date       sha256           size", "gray")}
+{colorize("icon-wcp/v1:latest                      gh200 2024-03-11 e901b85c7652802e 7.8 GB", "gray")}
+{colorize("icon-wcp/v1:v1                          gh200 2024-03-11 e901b85c7652802e 7.8 GB", "gray")}
+"""
+                                          )
+    deploy_parser.add_argument("--tags", required=False, default="latest", help="Comma separate list of tags.", type=str)
     deploy_parser.add_argument("source", nargs="?", default=None, type=str)
 
     return parser
@@ -116,7 +265,6 @@ def get_options(args):
     return options
 
 def get_filter(args):
-    # TODO: test "name" to see whether it is a sha/sha256
     options = get_options(args)
     img_filter = {"system": options["system"]}
 
@@ -139,9 +287,24 @@ def get_filter(args):
     return img_filter
 
 
-def relative_path_from_record(record):
-    return f"{record.sha256}"
+#def relative_path_from_record(record):
+    #return f"{record.sha256}"
 
+def inspect_string(record: record.Record, cache: datastore.FileSystemCache, format_string: str) -> str:
+    try:
+        return format_string.format(
+            system = record.system,
+            uarch = record.uarch,
+            name = record.name,
+            date = record.date,
+            version = record.version,
+            tag = record.tag,
+            sha256 = record.sha256,
+            path = cache.image_path(record),
+            sqfs = cache.image_path(record) + "/store.squashfs",
+        )
+    except Exception as err:
+        terminal.error(f"unable to format {str(err)}")
 
 # pretty print a list of Record
 def print_records(records):
@@ -284,7 +447,7 @@ if __name__ == "__main__":
 
         sys.exit(0)
 
-    elif args.command == "list":
+    elif args.command == "ls":
         repo_path = uenv_repo_path(args.repo)
         terminal.info(f"repo path: {repo_path}")
 
@@ -295,6 +458,27 @@ if __name__ == "__main__":
 
             records = fscache.database.find_records(**img_filter)
             print_records(records)
+
+        sys.exit(0)
+
+    elif args.command == "inspect":
+        repo_path = uenv_repo_path(args.repo)
+        terminal.info(f"repo path: {repo_path}")
+
+        img_filter = get_filter(args)
+
+        with flock.Lock(f"{repo_path}/index.json", flock.Lock.READ) as lk:
+            fscache = datastore.FileSystemCache(repo_path)
+
+            records = fscache.database.find_records(**img_filter)
+
+            if len(records)==0:
+                terminal.error(f"no uenv matches the spec: {args.uenv}")
+                sys.exit(1)
+
+            path = fscache.image_path(records[0])
+            formatted_output = inspect_string(records[0], fscache, args.format)
+            print(formatted_output)
 
         sys.exit(0)
 
@@ -311,7 +495,7 @@ if __name__ == "__main__":
 
     elif args.command == "deploy":
         source = args.source
-        terminal.info(f"trying to deploy {args.source} with tags {args.tag}")
+        terminal.info(f"trying to deploy {args.source} with tags {args.tags}")
 
         try:
             _, build_database = jfrog.query()
@@ -349,7 +533,7 @@ if __name__ == "__main__":
         target_record = copy.deepcopy(source_record)
 
         # create comma separated list of tags to be attached to the deployed image
-        tags = [ tag.strip() for tag in args.tag.split(',') ]
+        tags = [ tag.strip() for tag in args.tags.split(',') ]
         target_record.tag = ','.join(tags)
 
         terminal.info(f"source: {source_record}")
@@ -358,7 +542,7 @@ if __name__ == "__main__":
         terminal.info(f"source address: {source_address}")
         terminal.info(f"target address: {target_address}")
 
-        #oras.run_command(["cp", "--concurrency", "10", "--recursive", source_address, target_address])
+        oras.run_command(["cp", "--concurrency", "10", "--recursive", source_address, target_address])
 
         terminal.info(f"successfully deployed {target_address}")
 

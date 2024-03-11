@@ -92,7 +92,6 @@ class Record:
     def tag(self):
         return self._tag
 
-
     @tag.setter
     def tag(self, newtag):
         self._tag = newtag
