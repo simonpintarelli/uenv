@@ -5,12 +5,11 @@ import os
 import pathlib
 import re
 import sys
+import textwrap
 
 prefix = pathlib.Path(__file__).parent.resolve()
 libpath = prefix / 'uenv-lib'
 sys.path = [libpath.as_posix()] + sys.path
-
-from terminal import colorize
 
 import datastore
 import flock
@@ -18,7 +17,7 @@ import jfrog
 import oras
 import record
 import terminal
-import textwrap
+from terminal import colorize
 
 def make_argparser():
     parser = argparse.ArgumentParser(

@@ -12,6 +12,18 @@ import pathlib
 import sys
 import subprocess
 
+prefix = pathlib.Path(__file__).parent.resolve()
+libpath = prefix / 'uenv-lib'
+sys.path = [libpath.as_posix()] + sys.path
+
+import datastore
+import flock
+import jfrog
+import oras
+import record
+import terminal
+from terminal import colorize
+
 VERSION="@@version@@"
 
 shell_noop=" :"
@@ -56,47 +68,8 @@ def make_argparser():
 # Utility functions for string handling, printing, etc.
 ###############################################################################
 
-# Choose whether to use colored output.
-# - by default colored output is ON
-# - if the flag --no-color is passed it is OFF
-# - if the environment variable NO_COLOR is set it is OFF
-def use_colored_output(cli_arg):
-    # The --no-color argument overrides all environment variables if passed.
-    if cli_arg:
-        return False
-
-    # Check the env. var NO_COLOR and disable color if set.
-    if os.environ.get('NO_COLOR') is not None:
-        color_var = os.environ.get('NO_COLOR')
-        if len(color_var)>0 and color_var != "0":
-            return False
-
-    return True
-
-def colorize(string, color):
-    colors = {
-        "red":     "31",
-        "green":   "32",
-        "yellow":  "33",
-        "blue":    "34",
-        "magenta": "35",
-        "cyan":    "36",
-        "white":   "37",
-    }
-    if colored_output:
-        return f"\033[1;{colors[color]}m{string}\033[0m"
-    else:
-        return string
-
-def print_error(msg):
-    print(f"{colorize('[error]', 'red')} {msg}", file=sys.stderr)
-
 def print_warning(msg):
     print(f"{colorize('[warning]', 'yellow')} {msg}", file=sys.stderr)
-
-def print_debug(msg):
-    if verbose:
-        print(f"{colorize('[info]', 'cyan')} {msg}", file=sys.stderr)
 
 def echo_from_lines(lines):
     return [("echo '" + line + "'") for line in lines]
@@ -241,7 +214,7 @@ class uenv:
             if self.modules in [str(e) for e in env_module_paths]:
                 self.modules_loaded = True
             if self.modules_loaded:
-                print_debug(f"uenv {self.name} at {str(self.mount)} has modules loaded")
+                terminal.info(f"uenv {self.name} at {str(self.mount)} has modules loaded")
 
         if not self.is_native_mounted:
             print_warning(f"The uenv mounted at {self.mount} should be mounted at {self.native_mount}.")
@@ -263,7 +236,7 @@ class uenv:
                     env = json.load(fid)
                     return {"mount": path, "uenv": env}
                 except:
-                    print_error(f"unable to read environment configuration {env_file}")
+                    terminal.error(f"unable to read environment configuration {env_file}")
                     return empty_image
 
         print_warning(f"the environment mounted at {meta_path} has no configuration {env_file}")
@@ -275,28 +248,28 @@ class uenv:
 
         # no uenv - return the real mount point
         if not self.is_uenv:
-            print_debug(f"image at {self.mount} is not a uenv: setting native mount to {self.mount}")
+            terminal.info(f"image at {self.mount} is not a uenv: setting native mount to {self.mount}")
             return self.mount
 
         # check whether the mount point is explicitly in the image meta
         mnt = self._image["uenv"].get("mount", None)
 
         if mnt is not None:
-            print_debug(f"image at {self.mount} has native mount {mnt} set in meta data")
+            terminal.info(f"image at {self.mount} has native mount {mnt} set in meta data")
             return pathlib.Path(mnt)
 
         # check whether it can be inferred from a view path
         for e in self.views:
-            print_debug(f"image at {self.mount} has native mount {pathlib.Path(e['root']).parents[1]} inferred from views")
+            terminal.info(f"image at {self.mount} has native mount {pathlib.Path(e['root']).parents[1]} inferred from views")
             return pathlib.Path(e["root"]).parents[1]
 
         # check whether it can be inferred from a module path
         if self.modules is not None:
-            print_debug(f"image at {self.mount} has native mount {pathlib.Path(e['root']).parents[1]} inferred from modules")
+            terminal.info(f"image at {self.mount} has native mount {pathlib.Path(e['root']).parents[1]} inferred from modules")
             return pathlib.Path(self.modules).parents[0]
 
         # no mount information found, so assume that the actual mount point is valid.
-        print_debug(f"image at {self.mount} has native mount {self.mount} assumed")
+        terminal.info(f"image at {self.mount} has native mount {self.mount} assumed")
         return self.mount
 
     @property
@@ -383,7 +356,7 @@ class uenv:
 def generate_command(args):
     env = environment()
     if env.old_api:
-        print_error(f"the version of squashfs-mount on this system is too old.")
+        terminal.error(f"the version of squashfs-mount on this system is too old.")
         return shell_noop
 
     if args.command == "run":
@@ -399,7 +372,7 @@ def generate_command(args):
     elif args.command == "modules":
         return generate_modules_command(args, env)
 
-    print_error(f"unknown command '{args.command}'")
+    terminal.error(f"unknown command '{args.command}'")
     return shell_noop
 
 """
@@ -443,14 +416,14 @@ def generate_image_pairs(mnt_list):
 
     # check for zero length input
     if num_images==0:
-        print_error("No environment is provided")
+        terminal.error("No environment is provided")
         return []
 
     # inspect the first image
     img = parse_image_description(descriptions[0])
     if img is None:
         # handle error
-        print_error(f"Invalid image description {descriptions[0]}")
+        terminal.error(f"Invalid image description {descriptions[0]}")
         return []
     elif img["mount"] is None:
         img["mount"] = "/user-environment"
@@ -467,13 +440,13 @@ def generate_image_pairs(mnt_list):
 
     if img is None:
         # handle error
-        print_error(f"Invalid image description {descriptions[1]}")
+        terminal.error(f"Invalid image description {descriptions[1]}")
         return []
     elif img["mount"] is None:
         if implicit_mounts == True:
             img["mount"] = "/user-tools"
         else:
-            print_error(f"missing mount point in '{descriptions[1]}'")
+            terminal.error(f"missing mount point in '{descriptions[1]}'")
             return []
 
     implicit_mounts = False
@@ -483,10 +456,10 @@ def generate_image_pairs(mnt_list):
         img = parse_image_description(d)
 
         if img is None:
-            print_error(f"Invalid image description '{d}'")
+            terminal.error(f"Invalid image description '{d}'")
             return []
         if img["mount"] is None:
-            print_error(f"missing mount point in '{d}'")
+            terminal.error(f"missing mount point in '{d}'")
             return []
 
         mounts.append(img)
@@ -502,18 +475,18 @@ def parse_image_descriptions(mnt_list):
         if not img_path.is_absolute():
             img_path = pathlib.Path.cwd() / img_path
         if not img_path.is_file():
-            print_error(f"the user environment {colorize(img_path, 'white')} does not exist")
+            terminal.error(f"the user environment {colorize(img_path, 'white')} does not exist")
             return []
 
         mnt_path = pathlib.Path(m["mount"])
         if not mnt_path.is_absolute():
             mnt_path = pathlib.Path.cwd() / mnt_path
         if not mnt_path.is_dir():
-            print_error(f"the mount point {colorize(mnt_path, 'white')} does not exist")
+            terminal.error(f"the mount point {colorize(mnt_path, 'white')} does not exist")
             return []
 
         mount_pairs.append(f"{img_path}:{mnt_path}")
-        print_debug(f"  mounting: {img_path}:{mnt_path}")
+        terminal.info(f"  mounting: {img_path}:{mnt_path}")
 
     return mount_pairs
 
@@ -535,16 +508,16 @@ def split_runline(args):
     return images, cmd, cmdargs
 
 def generate_run_command(args, env):
-    print_debug(f"parsing run command with arguments: {args.command}")
+    terminal.info(f"parsing run command with arguments: {args.command}")
     if env.active:
-        print_error("a uenv is already running")
+        terminal.error("a uenv is already running")
         return shell_noop
 
     images, cmd, cmdargs = split_runline(args.runline)
 
-    print_debug(f"images: {images}")
-    print_debug(f"cmd: {cmd}")
-    print_debug(f"cmdargs: {cmdargs}")
+    terminal.info(f"images: {images}")
+    terminal.info(f"cmd: {cmd}")
+    terminal.info(f"cmdargs: {cmdargs}")
 
     mount_pairs=parse_image_descriptions(images)
     if mount_pairs==[]:
@@ -562,9 +535,9 @@ def generate_run_command(args, env):
 
 
 def generate_start_command(args, env):
-    print_debug(f"parsing start command with arguments: {args.image}")
+    terminal.info(f"parsing start command with arguments: {args.image}")
     if env.active:
-        print_error("a uenv is already running")
+        terminal.error("a uenv is already running")
         return shell_noop
 
     mount_pairs=parse_image_descriptions(args.image)
@@ -582,10 +555,10 @@ def generate_start_command(args, env):
 
 def generate_modules_command(args, env):
 
-    print_debug(f"parsing modules command: {args}")
+    terminal.info(f"parsing modules command: {args}")
 
     if not env.active:
-        print_error(f'there is no environment loaded')
+        terminal.error(f'there is no environment loaded')
         return shell_noop
 
     # generate a list of all the mounted environments that provide modules
@@ -594,7 +567,7 @@ def generate_modules_command(args, env):
             for e in env.uenvs
                 if (e.modules is not None) and e.is_native_mounted]
 
-    print_debug(f"modules are provided by {module_envs}")
+    terminal.info(f"modules are provided by {module_envs}")
 
     # No use command, i.e. the folloing CLI command was made:
     #   uenv modules
@@ -630,14 +603,14 @@ def generate_modules_command(args, env):
                             and (e.modules is not None)
                             and (e.is_native_mounted)]
                 if len(matches)==0:
-                    print_error(f"no uenv matching {i} provides modules")
+                    terminal.error(f"no uenv matching {i} provides modules")
                     return shell_noop
-                print_debug(f"  uenv {i} mounted at {matches[0]}")
+                terminal.info(f"  uenv {i} mounted at {matches[0]}")
                 mounts.append(matches[0])
 
         modulepaths = [str(p / 'modules') for p in mounts]
         for p in modulepaths:
-            print_debug(f"  using modules in {p}")
+            terminal.info(f"  using modules in {p}")
         modulecmds = [f"module use {p}" for p in modulepaths]
         modulecmds.append(f"export UENV_MODULE_PATH={','.join(modulepaths)}")
         return modulecmds
@@ -648,17 +621,17 @@ def generate_modules_command(args, env):
 def generate_view_command(args, env):
 
     if not env.active:
-        print_error(f'there is no environment loaded')
+        terminal.error(f'there is no environment loaded')
         return shell_noop
 
     if env.loaded_view is not None:
-        print_error(f'a view is already loaded: {env.loaded_view}')
+        terminal.error(f'a view is already loaded: {env.loaded_view}')
         return shell_noop
 
     uenv = env.uenvs[0]
     name = args.view_name
 
-    print_debug(f"trying to load view {name} in env loaded at {uenv.mount}")
+    terminal.info(f"trying to load view {name} in env loaded at {uenv.mount}")
 
     available_views = [v["name"] for v in uenv.views]
     if name in available_views:
@@ -667,7 +640,7 @@ def generate_view_command(args, env):
         return [f"source '{path}'",
                 f"export UENV_VIEW={uenv.mount}:{name}",]
     else:
-        print_error(f'the view "{name}" is not one of the available views: {available_views}')
+        terminal.error(f'the view "{name}" is not one of the available views: {available_views}')
 
     return shell_noop
 
@@ -680,7 +653,7 @@ def generate_status_command(args, env):
     first = True
 
     loaded_view = env.loaded_view
-    print_debug(f"loaded view: {loaded_view}")
+    terminal.info(f"loaded view: {loaded_view}")
 
     for uenv in env.uenvs:
         if not first:
@@ -733,7 +706,7 @@ def generate_status_command(args, env):
 def generate_stop_command(args, env):
 
     if not env.active:
-        print_error(f"there is no running environment to stop")
+        terminal.error(f"there is no running environment to stop")
         return shell_noop
 
     return "exit 0"
