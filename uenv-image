@@ -22,16 +22,17 @@ import textwrap
 
 def make_argparser():
     parser = argparse.ArgumentParser(
+            prog="uenv image",
             formatter_class=argparse.RawDescriptionHelpFormatter,
             description=textwrap.dedent(
-                """\
-Your one-stop shop for using uenv.
+f"""\
+The one-stop shop for using uenv.
 
-For more information on how to use individual commands use the --help flag, e.g.:
+For more information on how to use individual commands use the --help flag.
 
-uenv image --help
-uenv pull --help
-                """
+{colorize("Example", "blue")}: get help on the find command
+    {colorize("uenv image find --help", "white")}
+"""
                 ))
     parser.add_argument("--no-color",
             action="store_true",
@@ -403,13 +404,13 @@ if __name__ == "__main__":
             if len(records)==0:
                 terminal.error(f"no images match the query {args.uenv}")
 
-            # check that there is only one uenv name
+            # check that there is only one matching uenv
             if len(set([r.name for r in records]))>1:
                 print_records(records)
                 print()
                 terminal.error(f"ambiguous uenv {args.uenv}")
 
-            # check that there is only one uenv name
+            # check that there is only one matching uenv
             if len(set([r.uarch for r in records]))>1:
                 print_records(records)
                 print()
