@@ -68,6 +68,9 @@ local_install=no
 # dry-run (systemwide install only)
 uenv_debug=no
 
+# default installation destination, only required for bulding rpm packages
+destdir=""
+
 # loop over all arguments
 for (( i=1; i<=arg_count; i++ ))
 do
