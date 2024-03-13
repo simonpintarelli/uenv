@@ -52,15 +52,19 @@ def set_debug_level(level: int):
     global debug_level
     debug_level = level
 
-def error(message):
+def error(message, abort=True):
     print(f"{colorize('[error]', 'red')} {message}", file=sys.stderr)
-    exit(1)
+    if abort:
+        exit(1)
 
-def exit_with_success():
-    exit(0)
+def warning(message):
+    print(f"{colorize('[warning]', 'yellow')} {msg}", file=sys.stderr)
 
 def info(message):
     if debug_level>1:
         print(f"{colorize('[log]', 'blue')} {message}", file=sys.stderr)
+
+def exit_with_success():
+    exit(0)
 
 

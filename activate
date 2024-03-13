@@ -1,13 +1,14 @@
 # only run if bash or zsh
 [ -n "${BASH_VERSION:-}" -o -n "${ZSH_VERSION:-}" ] || return 0
 
-export UENV_ROOT=@@prefix@@
 export UENV_CMD=@@impl@@
 export UENV_IMG_CMD=@@image_impl@@
 export UENV_VERSION=@@version@@
 export UENV_PREFIX=@@prefix@@
 
 function uenv {
+    local _last_exitcode=$?
+
     function uenv_usage {
         echo "uenv - for using user environments [version @@version@@]"
         echo ""
@@ -37,6 +38,7 @@ function uenv {
     fi
 
     unset -f uenv_usage
+    return $_exitcode
 }
 
 export -f uenv

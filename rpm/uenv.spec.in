@@ -1,0 +1,22 @@
+Name:           uenv
+Version:        UENV_VERSION
+Release:        1%{?dist}
+Summary:        A command line interface for interacting with user environments on Alps at CSCS.
+URL:            https://eth-cscs.github.io/uenv
+Source:         %{name}-%{version}.tar.gz
+License:        ETH Zürich/CSCS
+BuildArch:      noarch
+
+%description
+A command line interface for interacting with user environments on Alps at CSCS.
+
+%prep
+
+%setup -q
+
+%install
+./install --yes --destdir=%{buildroot} --prefix=/opt/cscs
+
+%files
+/opt/cscs/uenv/
+/etc/profile.d/uenv.sh

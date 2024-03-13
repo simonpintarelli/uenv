@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
-version=3-dev
+
+set -euo pipefail
 
 script_path=$(dirname "$(readlink -f "$BASH_SOURCE")")
+version=$(cat "$script_path/VERSION")
+
+# default installation destination, only required for building rpm packages
+destdir=""
 
 get_oras_arch() {
   case "$(uname -m)" in
@@ -74,8 +79,11 @@ always_yes=no
 # default install system wide
 local_install=no
 
+# dry-run (systemwide install only)
+uenv_debug=no
+
 # loop over all arguments
-for (( i=1; i<=$arg_count; i++ ))
+for (( i=1; i<=arg_count; i++ ))
 do
     arg=${!i}
     case $arg in
@@ -88,6 +96,9 @@ do
         --yes)
         always_yes=yes
         ;;
+        --destdir=*)
+        destdir="${arg#*=}"
+        ;;
         --debug)
         uenv_debug=yes
         ;;
@@ -96,11 +107,11 @@ do
         exit 0
         ;;
         *)
-        echo "Error: unknown argument $arg"
-        echo
-        usage
-        exit 1
-        ;;
+            echo "Error: unknown argument $arg"
+            echo
+            usage
+            exit 1
+            ;;
     esac
 done
 
@@ -111,66 +122,67 @@ else
     prefix="${prefix:-$prefix_system}/uenv"
 fi
 
-[[ "x$uenv_debug" == xyes ]] && show=echo || show=""
+run () {
+    if [  "$uenv_debug" = yes ]; then
+        printf "%q "  "$@"
+        printf "\n"
+    else
+        "$@"
+    fi
+}
 
-echo "installing uenv version $version in $prefix"
+echo "installing uenv version $version in $prefix from $script_path"
 echo "local install: $local_install"
 
-$show mkdir -p "$prefix/libexec"
-$show chmod 755 "$prefix/libexec"
+libexec=${prefix}/libexec
+impl_path="${libexec}/uenv-impl"
+img_impl_path="${libexec}/uenv-image"
+lib_path="${libexec}/lib"
 if [ "$local_install" == "no" ]
 then
-    $show chmod -R 755 "$prefix"
-    init_path="/etc/profile.d/uenv.sh"
+    init_path="${destdir}/etc/profile.d/uenv.sh"
 else
-    $show mkdir -p "$prefix/bin"
-    init_path="$prefix/bin/activate-uenv"
+    init_path="${prefix}/bin/activate-uenv"
 fi
 
-impl_path="$prefix/libexec/uenv-impl"
-echo "installing $impl_path"
-$show cp "$script_path/uenv-impl" "$impl_path"
-$show sed "s|@@version@@|$version|g" -i "$impl_path"
-$show chmod 755 "$impl_path"
-
-# install the uenv image tool
-img_impl_path="$prefix/libexec/uenv-image"
-echo "installing $img_impl_path"
-$show cp "$script_path/uenv-image" "$img_impl_path"
-$show chmod 755 "$img_impl_path"
-
-lib_path="$prefix/libexec/uenv-lib"
 echo "installing $lib_path"
-$show install -v -m 755 -d "$lib_path"
-$show install -v -m 644 -D -t "$lib_path" uenv-lib/datastore.py
-$show install -v -m 644 -D -t "$lib_path" uenv-lib/flock.py
-$show install -v -m 644 -D -t "$lib_path" uenv-lib/jfrog.py
-$show install -v -m 644 -D -t "$lib_path" uenv-lib/oras.py
-$show install -v -m 644 -D -t "$lib_path" uenv-lib/record.py
-$show install -v -m 644 -D -t "$lib_path" uenv-lib/terminal.py
-$show cp "$script_path/uenv-image" "$img_impl_path"
+run install -v -m755 -d "$lib_path"
+run install -v -m644 -D -t "${destdir}/${lib_path}" lib/datastore.py
+run install -v -m644 -D -t "${destdir}/${lib_path}" lib/flock.py
+run install -v -m644 -D -t "${destdir}/${lib_path}" lib/jfrog.py
+run install -v -m644 -D -t "${destdir}/${lib_path}" lib/oras.py
+run install -v -m644 -D -t "${destdir}/${lib_path}" lib/record.py
+run install -v -m644 -D -t "${destdir}/${lib_path}" lib/terminal.py
 
-# Copy the initialisation script
-echo "installing $init_path"
-$show cp "$script_path/activate" "$init_path"
-$show sed "s|@@impl@@|$impl_path|g"  -i "$init_path"
-$show sed "s|@@image_impl@@|$img_impl_path|g"  -i "$init_path"
-$show sed "s|@@prefix@@|$prefix|g"   -i "$init_path"
-$show sed "s|@@version@@|$version|g" -i "$init_path"
-$show chmod 644 "$init_path"
+echo "installing ${img_impl_path}"
+run install -v -m755 -D "$script_path/uenv-image" "${destdir}/${img_impl_path}"
+
+## ALL GOOD BELOW HERE
+
+echo "installing $impl_path"
+run install -D -m755 <(sed "s|@@version@@|$version|g" $script_path/uenv-impl) ${destdir}/$impl_path
 
 # install the oras client
 echo "installing oras client"
-oras_arch=$(get_oras_arch)
-oras_version=1.1.0
-oras_file=oras_${oras_version}_linux_${oras_arch}.tar.gz
-oras_url=https://github.com/oras-project/oras/releases/download/v${oras_version}/${oras_file}
-oras_path=`mktemp -d`
-(cd "$oras_path"; $show wget --quiet "$oras_url"; $show tar -xzf "$oras_file"; $show rm *.tar.gz)
-oras_exe_path="$prefix/libexec/uenv-oras"
-$show cp "$oras_path/oras" "$oras_exe_path"
-$show chmod 755 "$oras_exe_path"
-$show rm -rf "$oras_path"
+#oras_arch=$(get_oras_arch)
+#oras_version=1.1.0
+#oras_file=oras_${oras_version}_linux_${oras_arch}.tar.gz
+#oras_url=https://github.com/oras-project/oras/releases/download/v${oras_version}/${oras_file}
+#oras_path=`mktemp -d`
+#(cd "$oras_path"; run wget --quiet "$oras_url"; run tar -xzf "$oras_file"; run rm *.tar.gz)
+#oras_exe_path="${libexec}/uenv-oras"
+#run install -v -m755 -D "${oras_path}/oras" "${destdir}/${oras_exe_path}"
 
-# update local bashrc if this is a local install
-[[ "$local_install" == "yes" ]] && prompt_bash_update "$prefix" "$always_yes"
+echo "installing $init_path"
+run install -v -m644 -D <(
+    sed \
+        -e "s|@@impl@@|$impl_path|g"  \
+        -e "s|@@version@@|$version|g" \
+        -e "s|@@prefix@@|$prefix|g"   \
+        -e "s|@@image_impl@@|$img_impl_path|g" \
+        $script_path/activate) \
+      $init_path
+
+if [[ "$local_install" == "yes" ]]; then
+    prompt_bash_update "$prefix" "$always_yes"
+fi

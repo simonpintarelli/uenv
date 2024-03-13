@@ -8,12 +8,13 @@ import sys
 import textwrap
 
 prefix = pathlib.Path(__file__).parent.resolve()
-libpath = prefix / 'uenv-lib'
+libpath = prefix / 'lib'
 sys.path = [libpath.as_posix()] + sys.path
 
 import datastore
 import flock
 import jfrog
+import names
 import oras
 import record
 import terminal
@@ -127,7 +128,7 @@ downloaded uenv with the list command. For more information:
 {colorize("Example", "blue")} - find all uenv with the name prgenv-gnu for uarch target gh200 on this cluster:
   {colorize("uenv image find prgenv-gnu --uarch=gh200", "white")}
 
-{colorize("Example", "blue")} - find all uenv that have a concrete sha245 checksum on this cluster:
+{colorize("Example", "blue")} - find all uenv that have a concrete sha256 checksum on this cluster:
   {colorize("uenv image find 3313739553fe6553f789a35325eb6954a37a7b85cdeab943d0878a05edaac998", "white")}
   {colorize("uenv image find 3313739553fe6553     # the first 16 characters can be used", "white")}
 
@@ -198,7 +199,7 @@ List uenv that are available.
 {colorize("Example", "blue")} - list all uenv with the name prgenv-gnu for uarch target gh200:
   {colorize("uenv image ls prgenv-gnu --uarch=gh200", "white")}
 
-{colorize("Example", "blue")} - list all uenv that have a concrete sha245 checksum:
+{colorize("Example", "blue")} - list all uenv that have a concrete sha256 checksum:
   {colorize("uenv image ls 3313739553fe6553f789a35325eb6954a37a7b85cdeab943d0878a05edaac998", "white")}
   {colorize("uenv image ls 3313739553fe6553", "white")} # the first 16 characters can be used
 """)
@@ -245,7 +246,8 @@ Then check that it has been deployed:
 """
                                           )
     deploy_parser.add_argument("--tags", required=False, default="latest", help="Comma separate list of tags.", type=str)
-    deploy_parser.add_argument("source", nargs="?", default=None, type=str)
+    deploy_parser.add_argument("source", nargs=1, type=str, metavar="SOURCE",
+                               help="The full name/version:tag or sha256 of the uenv to deploy.")
 
     return parser
 
@@ -266,29 +268,22 @@ def get_options(args):
 
 def get_filter(args):
     options = get_options(args)
-    img_filter = {"system": options["system"]}
 
     name = options["name"]
-    if (name is not None) and datastore.DataStore.is_valid_sha(name):
-        terminal.info(f"get_filter: search term {name} is being treated as a sha256")
-        img_filter["sha"] = name
-    elif name is not None:
-        terminal.info(f"get_filter: search term {name} is being treated as a name")
-        for key, value in parse_uenv_string(options["name"]).items():
-            if value is not None:
-                img_filter[key] = value
-    else:
+    if name is None:
         terminal.info(f"get_filter: no search term provided")
+        img_filter = {}
+    else:
+        terminal.info(f"get_filter: parsing {name}")
+        img_filter = names.create_filter(name, require_complete=False)
+
+    img_filter["system"] = options["system"]
 
     if options["uarch"] is not None:
         img_filter["uarch"] = options["uarch"]
 
     terminal.info(f"get_filter: filter {img_filter}")
     return img_filter
-
-
-#def relative_path_from_record(record):
-    #return f"{record.sha256}"
 
 def inspect_string(record: record.Record, cache: datastore.FileSystemCache, format_string: str) -> str:
     try:
@@ -325,23 +320,6 @@ def print_records(records):
             else:
                 size_str = f"{(S/(1024*1024*1024)):<.1f} GB"
             print(f"{label:<40}{r.uarch:6}{datestr:10} {r.sha256[:16]:16} {size_str:<10}")
-
-# return dictionary {"name", "version", "tag"} from a uenv description string
-#       "prgenv_gnu"              -> ("prgenv_gnu", None, None)
-#       "prgenv_gnu/23.11"        -> ("prgenv_gnu", "23.11", None)
-#       "prgenv_gnu/23.11:latest" -> ("prgenv_gnu", "23.11", "latest")
-def parse_uenv_string(desc: str) -> dict:
-    name = version = tag = None
-
-    if desc:
-        splits = desc.split("/",1)
-        name = splits[0]
-        if len(splits)>1:
-            splits = splits[1].split(":",1)
-            version = splits[0]
-            tag = splits[1] if len(splits)>1 else None
-
-    return {"name": name, "version": version, "tag": tag}
 
 # the path used to store a users cached images and meta data
 def uenv_repo_path(path: str=None) -> str:
@@ -494,40 +472,32 @@ if __name__ == "__main__":
         sys.exit(0)
 
     elif args.command == "deploy":
-        source = args.source
-        terminal.info(f"trying to deploy {args.source} with tags {args.tags}")
+        source = args.source[0]
+        terminal.info(f"request to deploy '{source}' with tags '{args.tags}'")
 
+        # for deployment, we require a complete description, i.e
+        #   name/version:tag OR sha256
+        try:
+            img_filter = names.create_filter(source, require_complete=True)
+        except names.IncompleteUenvName as err:
+            terminal.error(f"source {source} must have be of the form name/version:tag or sha256.")
+
+        # query JFrog for the list of images
         try:
             _, build_database = jfrog.query()
         except RuntimeError as err:
             terminal.error(f"{str(err)}")
+
         terminal.info(f"downloaded jfrog build meta data: {len(build_database.images)} images")
 
-        # after this block, source_record is the record of the requested source
-        if datastore.DataStore.is_valid_sha(source):
-            # lookup using sha256
-            source_record = build_database.get_record(source)
-            terminal.info(f"searched for {source} in the build repo, found: {source_record}")
-            if not source_record:
-                terminal.error(f"no record in the build repository matches the hash {source}")
-            source_record = source_record[0]
-        else:
-            img_filter = {}
-            for key, value in parse_uenv_string(source).items():
-                if value is not None:
-                    img_filter[key] = value
-                else:
-                    terminal.error(f"source {source} must have full name/version:tag format")
 
-            # expect that src has [name, version, tag] keys
-            records = build_database.find_records(**img_filter)
+        # expect that src has [name, version, tag] keys
+        records = build_database.find_records(**img_filter)
 
-            terminal.info(f"searched for {source} in the build repo, found: {records}")
+        if not (len(records)==1):
+            terminal.error(f"source {source} is not an image in the build repository")
 
-            if not (len(records)==1):
-                terminal.error(f"source {source} is not an image in the build repository")
-            source_record = records[0]
-
+        source_record = records[0]
         terminal.info(f"the source is {source_record}")
 
         target_record = copy.deepcopy(source_record)

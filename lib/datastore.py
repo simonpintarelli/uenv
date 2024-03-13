@@ -1,29 +1,13 @@
 import json
-import re
 import os
 
 from record import Record
 import terminal
+import names
 
 UENV_CLI_API_VERSION=1
 
-def is_full_sha256(s: str):
-    pattern = re.compile(r'^[a-fA-F-0-9]{64}$')
-    return True if pattern.match(s) else False
-
-def is_short_sha256(s: str):
-    pattern = re.compile(r'^[a-fA-F-0-9]{16}$')
-    return True if pattern.match(s) else False
-
-
 class DataStore:
-    @staticmethod
-    def is_valid_sha(sha:str) -> bool:
-        if is_full_sha256(sha):
-            return True
-        if is_short_sha256(sha):
-            return True
-        return False
 
     def __init__(self):
         # all images store with (key,value) = (sha256,Record)
@@ -163,7 +147,7 @@ class FileSystemCache():
     # Return the full record for a given hash
     # Returns None if no image with that hash is stored in the repo.
     def get_record(self, sha256: str):
-        if not DataStore.is_valid_sha(sha256):
+        if not names.is_valid_sha(sha256):
             raise ValueError(f"{sha256} is not a valid image sha256 (neither full 64 or short 16 character form)")
         return self._database.get_record(sha256)
 
