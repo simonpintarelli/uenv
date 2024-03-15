@@ -58,11 +58,11 @@ def error(message, abort=True):
         exit(1)
 
 def warning(message):
-    print(f"{colorize('[warning]', 'yellow')} {msg}", file=sys.stderr)
+    print(f"{colorize('[warning]', 'yellow')} {message}", file=sys.stderr)
 
 def info(message):
     if debug_level>1:
-        print(f"{colorize('[log]', 'blue')} {message}", file=sys.stderr)
+        print(f"{colorize('[info]', 'green')} {message}", file=sys.stderr)
 
 def exit_with_success():
     exit(0)

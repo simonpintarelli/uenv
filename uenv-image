@@ -1,4 +1,10 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3
+
+# --- A note about the shebang ---
+# It is hard-coded to /usr/bin/python3 instead of "/usr/bin/env python3" so that the
+# same python3 is always used, instead of using a version of python3 that might be
+# loaded into the environment.
+
 import argparse
 import copy
 import os
@@ -11,6 +17,7 @@ prefix = pathlib.Path(__file__).parent.resolve()
 libpath = prefix / 'lib'
 sys.path = [libpath.as_posix()] + sys.path
 
+import alps
 import datastore
 import flock
 import jfrog
@@ -245,7 +252,7 @@ Then check that it has been deployed:
 {colorize("icon-wcp/v1:v1                          gh200 2024-03-11 e901b85c7652802e 7.8 GB", "gray")}
 """
                                           )
-    deploy_parser.add_argument("--tags", required=False, default="latest", help="Comma separate list of tags.", type=str)
+    deploy_parser.add_argument("--tags", required=False, default="latest", help="Comma separated list of tags.", type=str)
     deploy_parser.add_argument("source", nargs=1, type=str, metavar="SOURCE",
                                help="The full name/version:tag or sha256 of the uenv to deploy.")
 
@@ -321,23 +328,6 @@ def print_records(records):
                 size_str = f"{(S/(1024*1024*1024)):<.1f} GB"
             print(f"{label:<40}{r.uarch:6}{datestr:10} {r.sha256[:16]:16} {size_str:<10}")
 
-# the path used to store a users cached images and meta data
-def uenv_repo_path(path: str=None) -> str:
-    if path is not None:
-        return path
-
-    # check whether the image path has been explicitly set:
-    path = os.environ.get('UENV_REPO_PATH')
-    if path is not None:
-        return path
-
-    # if not, try to use the path $SCRATCH/.uenv-images/, if SCRATCH exists
-    path = os.environ.get('SCRATCH')
-    if path is not None:
-        return path + "/.uenv-images"
-
-    terminal.error("No repository path available: set UENV_REPO_PATH or use the --repo flag")
-
 if __name__ == "__main__":
 
     parser = make_argparser()
@@ -352,6 +342,10 @@ if __name__ == "__main__":
         terminal.set_debug_level(2)
 
     terminal.info(f"command mode: {args.command}")
+
+    repo_path = alps.uenv_repo_path(args.repo)
+
+    terminal.info(f"local repository: {repo_path}")
 
     if args.command in ["find", "pull"]:
         img_filter = get_filter(args)
@@ -400,7 +394,6 @@ if __name__ == "__main__":
 
             terminal.info(f"pulling {t} from {source_address} {t.size/(1024*1024):.0f} MB")
 
-            repo_path = uenv_repo_path(args.repo)
             terminal.info(f"repo path: {repo_path}")
 
             with flock.Lock(f"{repo_path}/index.json", flock.Lock.WRITE) as lk:
@@ -426,7 +419,6 @@ if __name__ == "__main__":
         sys.exit(0)
 
     elif args.command == "ls":
-        repo_path = uenv_repo_path(args.repo)
         terminal.info(f"repo path: {repo_path}")
 
         img_filter = get_filter(args)
@@ -440,7 +432,6 @@ if __name__ == "__main__":
         sys.exit(0)
 
     elif args.command == "inspect":
-        repo_path = uenv_repo_path(args.repo)
         terminal.info(f"repo path: {repo_path}")
 
         img_filter = get_filter(args)
@@ -461,7 +452,6 @@ if __name__ == "__main__":
         sys.exit(0)
 
     elif args.command == "create":
-        repo_path = uenv_repo_path(args.repo)
         terminal.info(f"repo path: {repo_path}")
 
         try:
@@ -517,5 +507,4 @@ if __name__ == "__main__":
         terminal.info(f"successfully deployed {target_address}")
 
         sys.exit(0)
-
 

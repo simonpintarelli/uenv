@@ -16,10 +16,10 @@ prefix = pathlib.Path(__file__).parent.resolve()
 libpath = prefix / 'lib'
 sys.path = [libpath.as_posix()] + sys.path
 
+import alps
 import datastore
 import flock
-import jfrog
-import oras
+import names
 import record
 import terminal
 from terminal import colorize
@@ -31,8 +31,12 @@ shell_error="local _exitcode=1"
 
 def make_argparser():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--no-color", action="store_true")
-    parser.add_argument("--verbose", action="store_true")
+    parser.add_argument("--no-color", action="store_true", help="disable color output")
+    parser.add_argument("--verbose", action="store_true", help="verbose output for debugging")
+    parser.add_argument("-r", "--repo",
+            required=False, default=None, type=str,
+            help="The path on the local filesystem where uenv are managed. By default the environment variable UENV_REPO_PATH is used, if set, otherwise $SCRATCH/.uenv-images is used if the SCRATCH environment variable is set. This option will override these defaults, and must be set if neither of the defaults is set.")
+
     subparsers = parser.add_subparsers(dest="command")
 
     #### run
@@ -74,9 +78,6 @@ def make_argparser():
 ###############################################################################
 # Utility functions for string handling, printing, etc.
 ###############################################################################
-
-def print_warning(msg):
-    print(f"{colorize('[warning]', 'yellow')} {msg}", file=sys.stderr)
 
 def echo_from_lines(lines):
     return [("echo '" + line + "'") for line in lines]
@@ -480,27 +481,40 @@ def parse_image_descriptions(mnt_list):
 
     mount_pairs = []
     for m in mounts:
-        uenv = pathlib.PosixPath(m["image"])
-        if not uenv.is_file():
-            img_filter = names.create_filter(name, require_complete=False)
-            img_filter["system"] = #TODO
-            img_filter["uarch"]  = #TODO
+        uenv = m["image"]
+        terminal.info(f"requested mount {m['image']} at {m['mount']}")
+        uenv_path = pathlib.PosixPath(uenv)
+        if not uenv_path.is_file():
+            terminal.info(f"no file matching description found")
 
-            # TODO repo_path needs to be inferred
+            # TODO support --repo CLI argument
+            repo_path = alps.uenv_repo_path(None)
+            terminal.info(f"looking in the repository {repo_path}")
+
+            img_filter = names.create_filter(uenv, require_complete=False)
+            if os.environ.get('CLUSTER_NAME') is not None:
+                img_filter["system"] = os.environ.get('CLUSTER_NAME')
+            else:
+                terminal.warning("the CLUSTER_NAME environment variable is not set")
+
+            # TODO: the uarch will have to be set for systems with more than one uarch
+            #img_filter["uarch"]  = "gh200"
+
             with flock.Lock(f"{repo_path}/index.json", flock.Lock.READ) as lk:
                 fscache = datastore.FileSystemCache(repo_path)
 
                 records = fscache.database.find_records(**img_filter)
 
                 if len(records)==0:
-                    terminal.error(f"no uenv matches the spec: {args.uenv}")
+                    terminal.error(f"no uenv matches the spec: {uenv}")
                     sys.exit(1)
 
-                path = fscache.image_path(records[0])
-                terminal.info(f"lookup {uenv} returned path {path}")
-                uenv = path
+                terminal.info(f"selected image {records[0]} from repository  {repo_path}")
+
+                uenv_path = fscache.image_path(records[0]) + "/store.squashfs"
+                terminal.info(f"lookup {uenv} returned {uenv_path}")
         else:
-            uenv = uenv.resolve()
+            uenv_path = uenv_path.resolve()
 
         mnt_path = pathlib.Path(m["mount"])
         if not mnt_path.is_dir():
@@ -510,8 +524,8 @@ def parse_image_descriptions(mnt_list):
             terminal.error(f"the mount point {colorize(mnt_path, 'white')} is a relative path", abort=False)
             return []
 
-        mount_pairs.append(f"{uenv}:{mnt_path}")
-        terminal.info(f"  mounting: {uenv}:{mnt_path}")
+        mount_pairs.append(f"{uenv_path}:{mnt_path}")
+        terminal.info(f"  mounting: {uenv_path}:{mnt_path}")
 
     return mount_pairs
 
