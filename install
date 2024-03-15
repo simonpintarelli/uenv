@@ -147,14 +147,14 @@ fi
 
 echo "installing $lib_path"
 run install -v -m755 -d "$lib_path"
-run install -v -m644 -D -t "${destdir}/${lib_path}" lib/alps.py
-run install -v -m644 -D -t "${destdir}/${lib_path}" lib/datastore.py
-run install -v -m644 -D -t "${destdir}/${lib_path}" lib/flock.py
-run install -v -m644 -D -t "${destdir}/${lib_path}" lib/jfrog.py
-run install -v -m644 -D -t "${destdir}/${lib_path}" lib/names.py
-run install -v -m644 -D -t "${destdir}/${lib_path}" lib/oras.py
-run install -v -m644 -D -t "${destdir}/${lib_path}" lib/record.py
-run install -v -m644 -D -t "${destdir}/${lib_path}" lib/terminal.py
+run install -v -m644 -D -t "${destdir}/${lib_path}" ${script_path}/lib/alps.py
+run install -v -m644 -D -t "${destdir}/${lib_path}" ${script_path}/lib/datastore.py
+run install -v -m644 -D -t "${destdir}/${lib_path}" ${script_path}/lib/flock.py
+run install -v -m644 -D -t "${destdir}/${lib_path}" ${script_path}/lib/jfrog.py
+run install -v -m644 -D -t "${destdir}/${lib_path}" ${script_path}/lib/names.py
+run install -v -m644 -D -t "${destdir}/${lib_path}" ${script_path}/lib/oras.py
+run install -v -m644 -D -t "${destdir}/${lib_path}" ${script_path}/lib/record.py
+run install -v -m644 -D -t "${destdir}/${lib_path}" ${script_path}/lib/terminal.py
 
 echo "installing ${img_impl_path}"
 run install -v -m755 -D "$script_path/uenv-image" "${destdir}/${img_impl_path}"
